@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "806741376387",
+    "project_id": "projectmilktea",
+    "storage_bucket": "projectmilktea.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:806741376387:android:65c142f16dc482b57d0ab6",
+        "android_client_info": {
+          "package_name": "com.example.projectgroup_milktea"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "806741376387-p9p2m8qaar7150n3gd1pk6mj1h21e2ot.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.projectgroup_milktea",
+            "certificate_hash": "744876341f20468187bfd3a07026a82239586504"
+          }
+        },
+        {
+          "client_id": "806741376387-25gh4c9c297fgaei5hlqjt71gl5iml2s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCdkcRgaQM4vyvlDoD-aaLYqRc1ZVpcG5o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "806741376387-25gh4c9c297fgaei5hlqjt71gl5iml2s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
