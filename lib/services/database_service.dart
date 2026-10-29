@@ -118,4 +118,28 @@ class DatabaseService {
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
+
+  /// Tạo đơn hàng mới trên Firestore khi khách thanh toán
+  Future<DocumentReference> createOrder(Map<String, dynamic> orderData) async {
+    return await _firestore.collection('orders').add(orderData);
+  }
+
+  /// Lấy danh sách đơn hàng của một khách hàng cụ thể theo thời gian thực
+  Stream<List<OrderModel>> getCustomerOrdersStream(String userId) {
+    return _firestore.collection('orders').snapshots().map((snapshot) {
+      final orders = snapshot.docs
+          .map((doc) => OrderModel.fromFirestore(doc))
+          .where((order) => order.userId == userId)
+          .toList();
+
+      orders.sort((a, b) {
+        if (a.createdAt == null && b.createdAt == null) return 0;
+        if (a.createdAt == null) return 1;
+        if (b.createdAt == null) return -1;
+        return b.createdAt!.compareTo(a.createdAt!);
+      });
+
+      return orders;
+    });
+  }
 }

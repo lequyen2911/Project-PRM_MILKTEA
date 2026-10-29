@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../models/product_model.dart';
+import '../../providers/cart_provider.dart';
 import '../../services/database_service.dart';
+import 'cart_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final ProductModel product;
@@ -371,15 +374,54 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                   ),
                   onPressed: () {
+                    final toppingPrice = _selectedToppings.fold<int>(
+                      0,
+                      (sum, t) => sum + (t['price'] as num).toInt(),
+                    );
+                    final unitPrice = widget.product.basePrice +
+                        (_sizePrice[_selectedSize] ?? 0) +
+                        toppingPrice;
+
+                    context.read<CartProvider>().addItem(
+                          productId: widget.product.id,
+                          productName: widget.product.name,
+                          imageUrl: widget.product.imageUrl,
+                          size: _selectedSize,
+                          sugar: _selectedSugar,
+                          ice: _selectedIce,
+                          toppings: _selectedToppings
+                              .map((t) => t['name'].toString())
+                              .toList(),
+                          unitPrice: unitPrice,
+                          quantity: _quantity,
+                        );
+
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
-                          'Đã chọn ${widget.product.name} (x$_quantity) - ${_formatPrice(_totalPrice)}',
+                          'Đã thêm ${widget.product.name} (x$_quantity) vào giỏ hàng!',
                         ),
-                        backgroundColor: Colors.green.shade700,
+                        backgroundColor: const Color(0xFF6D4C41),
                         behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        action: SnackBarAction(
+                          label: 'Xem giỏ',
+                          textColor: const Color(0xFFFFCC80),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const CartScreen(),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     );
+
                     Navigator.pop(context);
                   },
                   child: Text(

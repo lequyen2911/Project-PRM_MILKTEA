@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import '../../models/product_model.dart';
+import '../../providers/cart_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 import '../../services/database_seeder.dart';
 import '../auth/login_screen.dart';
 import '../seller/seller_dashboard_screen.dart';
+import 'cart_screen.dart';
+import 'order_history_screen.dart';
 import 'product_detail_screen.dart';
 
 class CustomerHomeScreen extends StatefulWidget {
@@ -128,6 +132,41 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                   );
                 }
               }
+            },
+          ),
+          // Nút Lịch sử đơn hàng của tôi
+          IconButton(
+            icon: const Icon(Icons.receipt_long_rounded),
+            tooltip: 'Đơn hàng của tôi',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
+              );
+            },
+          ),
+          // Nút Giỏ hàng với Badge số lượng ly
+          Consumer<CartProvider>(
+            builder: (context, cart, child) {
+              return Badge(
+                isLabelVisible: cart.totalQuantity > 0,
+                label: Text(
+                  '${cart.totalQuantity}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                ),
+                backgroundColor: const Color(0xFFD87D4A),
+                offset: const Offset(-4, 4),
+                child: IconButton(
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  tooltip: 'Giỏ hàng',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const CartScreen()),
+                    );
+                  },
+                ),
+              );
             },
           ),
           IconButton(
@@ -420,6 +459,99 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                   ),
                 ),
             ],
+          );
+        },
+      ),
+      bottomNavigationBar: Consumer<CartProvider>(
+        builder: (context, cart, child) {
+          if (cart.isEmpty) return const SizedBox.shrink();
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, -3),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CartScreen()),
+                  );
+                },
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: primaryColor,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: primaryColor.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${cart.totalQuantity} ly trong giỏ',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            cart.formattedTotalAmount,
+                            style: const TextStyle(
+                              color: Color(0xFFFFCC80),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      const Row(
+                        children: [
+                          Text(
+                            'Xem giỏ hàng',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          SizedBox(width: 4),
+                          Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 14),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           );
         },
       ),
