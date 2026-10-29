@@ -267,13 +267,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 ),
               ),
 
-              // 2. KHU VỰC TOPPING TRÊN GIAO DIỆN CHÍNH (Hiển thị nổi bật phía trên)
-              if (_selectedCategory != 'Topping')
-                SliverToBoxAdapter(
-                  child: _buildToppingSection(context, allProducts, primaryColor, accentColor),
-                ),
-
-              // 3. Tiêu đề menu & Tabs danh mục
+              // 2. Tiêu đề menu & Tabs danh mục
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
