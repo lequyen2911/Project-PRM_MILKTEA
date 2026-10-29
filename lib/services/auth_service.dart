@@ -54,12 +54,14 @@ class AuthService {
         try {
           final userDoc = await _firestore.collection('users').doc(user.uid).get();
           if (!userDoc.exists) {
-            // Mặc định tài khoản mới là 'customer'
+            final String userEmail = (user.email ?? '').toLowerCase();
+            final String defaultRole = (userEmail == 'admin.tiemtranho@gmail.com') ? 'seller' : 'customer';
+
             await _firestore.collection('users').doc(user.uid).set({
               'uid': user.uid,
               'email': user.email ?? '',
               'name': user.displayName ?? 'Khách hàng',
-              'role': 'customer',
+              'role': defaultRole,
               'createdAt': FieldValue.serverTimestamp(),
             });
           }
@@ -94,13 +96,18 @@ class AuthService {
         // Cập nhật Tên hiển thị trong Firebase Auth
         await user.updateDisplayName(name.trim());
 
-        // Lưu thông tin vào Firestore với role mặc định là 'customer'
+        final String normalizedEmail = email.trim().toLowerCase();
+        final String finalRole = (normalizedEmail == 'admin.tiemtranho@gmail.com')
+            ? 'seller'
+            : 'customer';
+
+        // Lưu thông tin vào Firestore với role tương ứng
         try {
           await _firestore.collection('users').doc(user.uid).set({
             'uid': user.uid,
             'email': email.trim(),
             'name': name.trim(),
-            'role': 'customer',
+            'role': finalRole,
             'createdAt': FieldValue.serverTimestamp(),
           });
         } catch (fsErr) {

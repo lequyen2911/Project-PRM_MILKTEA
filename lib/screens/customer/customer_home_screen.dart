@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/product_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 import '../../services/database_seeder.dart';
 import '../auth/login_screen.dart';
+import '../seller/seller_dashboard_screen.dart';
 import 'product_detail_screen.dart';
 
 class CustomerHomeScreen extends StatefulWidget {
@@ -73,6 +75,36 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
           ],
         ),
         actions: [
+          // Nút chuyển đến Kênh Quản Trị (Chỉ hiện nếu user là Seller / Admin)
+          if (user != null)
+            FutureBuilder<DocumentSnapshot>(
+              future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
+              builder: (context, snapshot) {
+                bool isSeller = false;
+                final email = user.email?.trim().toLowerCase() ?? '';
+                if (email == 'admin.tiemtranho@gmail.com') {
+                  isSeller = true;
+                } else if (snapshot.hasData && snapshot.data!.exists) {
+                  final data = snapshot.data!.data() as Map<String, dynamic>?;
+                  if (data?['role'] == 'seller') {
+                    isSeller = true;
+                  }
+                }
+
+                if (!isSeller) return const SizedBox.shrink();
+
+                return IconButton(
+                  icon: const Icon(Icons.storefront_rounded),
+                  tooltip: 'Kênh Quản Trị (Seller)',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const SellerDashboardScreen()),
+                    );
+                  },
+                );
+              },
+            ),
           // Nút cập nhật link ảnh tự động lên Firestore
           IconButton(
             icon: const Icon(Icons.sync_rounded),
