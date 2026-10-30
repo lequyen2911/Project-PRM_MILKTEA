@@ -118,6 +118,34 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Cảnh báo nếu sản phẩm hết hàng
+                  if (!widget.product.isAvailable)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        border: Border.all(color: Colors.red.shade300),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.warning_amber_rounded, color: Colors.red.shade700),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Sản phẩm này hiện đang TẠM HẾT HÀNG. Quý khách không thể đặt mua vào lúc này.',
+                              style: TextStyle(
+                                color: Colors.red.shade900,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
                   // Tên món và giá gốc
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -176,9 +204,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             color: isSelected ? Colors.white : Colors.black87,
                             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                           ),
-                          onSelected: (selected) {
-                            if (selected) setState(() => _selectedSize = size);
-                          },
+                          onSelected: widget.product.isAvailable
+                              ? (selected) {
+                                  if (selected) setState(() => _selectedSize = size);
+                                }
+                              : null,
                         ),
                       );
                     }).toList(),
@@ -203,9 +233,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         labelStyle: TextStyle(
                           color: isSelected ? Colors.white : Colors.black87,
                         ),
-                        onSelected: (selected) {
-                          if (selected) setState(() => _selectedSugar = sugar);
-                        },
+                        onSelected: widget.product.isAvailable
+                            ? (selected) {
+                                if (selected) setState(() => _selectedSugar = sugar);
+                              }
+                            : null,
                       );
                     }).toList(),
                   ),
@@ -229,9 +261,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         labelStyle: TextStyle(
                           color: isSelected ? Colors.white : Colors.black87,
                         ),
-                        onSelected: (selected) {
-                          if (selected) setState(() => _selectedIce = ice);
-                        },
+                        onSelected: widget.product.isAvailable
+                            ? (selected) {
+                                if (selected) setState(() => _selectedIce = ice);
+                              }
+                            : null,
                       );
                     }).toList(),
                   ),
@@ -262,8 +296,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           final isChecked = _selectedToppings
                               .any((t) => t['id'] == topping['id']);
                           final price = (topping['price'] as num).toInt();
-
                           final img = topping['imageUrl'] ?? topping['image'] ?? '';
+                          final rawAvailable = topping['isAvailable'] ?? topping['available'];
+                          final bool isToppingAvailable = rawAvailable == null ? true : (rawAvailable == true);
 
                           return CheckboxListTile(
                             contentPadding: EdgeInsets.zero,
@@ -287,20 +322,32 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                       color: Color(0xFF6D4C41),
                                     ),
                             ),
-                            title: Text(topping['name'] ?? ''),
-                            subtitle: Text('+${_formatPrice(price)}'),
+                            title: Text(
+                              topping['name'] ?? '',
+                              style: TextStyle(
+                                color: isToppingAvailable ? Colors.black87 : Colors.grey,
+                              ),
+                            ),
+                            subtitle: Text(
+                              isToppingAvailable ? '+${_formatPrice(price)}' : '+${_formatPrice(price)} (Hết hàng)',
+                              style: TextStyle(
+                                color: isToppingAvailable ? Colors.brown.shade700 : Colors.red,
+                              ),
+                            ),
                             value: isChecked,
                             activeColor: primaryColor,
-                            onChanged: (bool? val) {
-                              setState(() {
-                                if (val == true) {
-                                  _selectedToppings.add(topping);
-                                } else {
-                                  _selectedToppings.removeWhere(
-                                      (t) => t['id'] == topping['id']);
-                                }
-                              });
-                            },
+                            onChanged: (widget.product.isAvailable && isToppingAvailable)
+                                ? (bool? val) {
+                                    setState(() {
+                                      if (val == true) {
+                                        _selectedToppings.add(topping);
+                                      } else {
+                                        _selectedToppings.removeWhere(
+                                            (t) => t['id'] == topping['id']);
+                                      }
+                                    });
+                                  }
+                                : null,
                           );
                         }).toList(),
                       );
@@ -341,11 +388,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   children: [
                     IconButton(
                       icon: const Icon(Icons.remove, size: 18),
-                      onPressed: () {
-                        if (_quantity > 1) {
-                          setState(() => _quantity--);
-                        }
-                      },
+                      onPressed: widget.product.isAvailable
+                          ? () {
+                              if (_quantity > 1) {
+                                setState(() => _quantity--);
+                              }
+                            }
+                          : null,
                     ),
                     Text(
                       '$_quantity',
@@ -353,9 +402,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     IconButton(
                       icon: const Icon(Icons.add, size: 18),
-                      onPressed: () {
-                        setState(() => _quantity++);
-                      },
+                      onPressed: widget.product.isAvailable
+                          ? () {
+                              setState(() => _quantity++);
+                            }
+                          : null,
                     ),
                   ],
                 ),
@@ -366,66 +417,77 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               Expanded(
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
+                    backgroundColor: widget.product.isAvailable ? primaryColor : Colors.grey,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  onPressed: () {
-                    final toppingPrice = _selectedToppings.fold<int>(
-                      0,
-                      (sum, t) => sum + (t['price'] as num).toInt(),
-                    );
-                    final unitPrice = widget.product.basePrice +
-                        (_sizePrice[_selectedSize] ?? 0) +
-                        toppingPrice;
+                  onPressed: !widget.product.isAvailable
+                      ? () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('⚠️ Sản phẩm đã hết hàng, không thể thêm vào giỏ!'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      : () {
+                          final toppingPrice = _selectedToppings.fold<int>(
+                            0,
+                            (sum, t) => sum + (t['price'] as num).toInt(),
+                          );
+                          final unitPrice = widget.product.basePrice +
+                              (_sizePrice[_selectedSize] ?? 0) +
+                              toppingPrice;
 
-                    context.read<CartProvider>().addItem(
-                          productId: widget.product.id,
-                          productName: widget.product.name,
-                          imageUrl: widget.product.imageUrl,
-                          size: _selectedSize,
-                          sugar: _selectedSugar,
-                          ice: _selectedIce,
-                          toppings: _selectedToppings
-                              .map((t) => t['name'].toString())
-                              .toList(),
-                          unitPrice: unitPrice,
-                          quantity: _quantity,
-                        );
+                          context.read<CartProvider>().addItem(
+                                productId: widget.product.id,
+                                productName: widget.product.name,
+                                imageUrl: widget.product.imageUrl,
+                                size: _selectedSize,
+                                sugar: _selectedSugar,
+                                ice: _selectedIce,
+                                toppings: _selectedToppings
+                                    .map((t) => t['name'].toString())
+                                    .toList(),
+                                unitPrice: unitPrice,
+                                quantity: _quantity,
+                              );
 
-                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Đã thêm ${widget.product.name} (x$_quantity) vào giỏ hàng!',
-                        ),
-                        backgroundColor: const Color(0xFF6D4C41),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        action: SnackBarAction(
-                          label: 'Xem giỏ',
-                          textColor: const Color(0xFFFFCC80),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const CartScreen(),
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Đã thêm ${widget.product.name} (x$_quantity) vào giỏ hàng!',
                               ),
-                            );
-                          },
-                        ),
-                      ),
-                    );
+                              backgroundColor: const Color(0xFF6D4C41),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              action: SnackBarAction(
+                                label: 'Xem giỏ',
+                                textColor: const Color(0xFFFFCC80),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const CartScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          );
 
-                    Navigator.pop(context);
-                  },
+                          Navigator.pop(context);
+                        },
                   child: Text(
-                    'Thêm • ${_formatPrice(_totalPrice)}',
+                    widget.product.isAvailable
+                        ? 'Thêm • ${_formatPrice(_totalPrice)}'
+                        : 'HẾT HÀNG',
                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                   ),
                 ),

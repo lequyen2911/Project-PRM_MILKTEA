@@ -137,6 +137,49 @@ class _CartScreenState extends State<CartScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+      // Ẩn mọi thông báo cũ (ví dụ: thông báo "Đã thêm vào giỏ hàng" còn đọng lại)
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      }
+
+      // 1. Kiểm tra lại trạng thái stock (isAvailable) và active (isActive) của từng sản phẩm trong giỏ hàng từ Firestore
+      for (var item in cart.itemList) {
+        final freshProduct = await _dbService.getProductById(item.productId);
+        if (freshProduct == null || !freshProduct.isActive || !freshProduct.isAvailable) {
+          if (!mounted) return;
+          setState(() => _isSubmitting = false);
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.error_outline, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Sản Phẩm Hết Hàng', style: TextStyle(color: Colors.red, fontSize: 16)),
+                ],
+              ),
+              content: Text(
+                'Món "${item.productName}" trong giỏ hàng hiện đã hết hàng hoặc không còn hoạt động. Vui lòng xóa món này khỏi giỏ hàng trước khi tiếp tục đặt hàng.',
+                style: const TextStyle(fontSize: 14, height: 1.4),
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryBrown,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Đã hiểu'),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
+      }
+
       final user = FirebaseAuth.instance.currentUser;
       final now = DateTime.now();
       final randomSuffix = (now.millisecondsSinceEpoch % 100000).toString().padLeft(5, '0');
@@ -180,6 +223,9 @@ class _CartScreenState extends State<CartScreen> {
       }
 
       // Xóa sạch giỏ hàng sau khi đặt thành công
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      }
       cart.clear();
 
       if (!mounted) return;

@@ -186,7 +186,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
         ],
       ),
       body: StreamBuilder<List<ProductModel>>(
-        stream: _dbService.getProductsStream(),
+        stream: _dbService.getProductsStream(onlyActive: true), // Chỉ lấy sản phẩm isActive == true cho khách hàng
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
@@ -412,7 +412,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                           const SizedBox(height: 12),
                           Text(
                             allProducts.isEmpty
-                                ? 'Chưa có món nào trong collection [products] trên Firestore!'
+                                ? 'Chưa có món nào đang hiển thị trên Firestore!'
                                 : 'Không tìm thấy món phù hợp với tìm kiếm.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
@@ -631,6 +631,8 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                     : int.tryParse(topping['price']?.toString() ?? '0') ?? 0;
                 final img = topping['imageUrl'] ?? topping['image'] ?? '';
                 final desc = topping['description'] ?? topping['desc'] ?? '';
+                final rawAvailable = topping['isAvailable'] ?? topping['available'];
+                final bool isAvailable = rawAvailable == null ? true : (rawAvailable == true);
 
                 return Card(
                   elevation: 2,
@@ -694,6 +696,26 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                                   ),
                                 ),
                               ),
+                              if (!isAvailable)
+                                Positioned(
+                                  top: 8,
+                                  right: 8,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade700,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Text(
+                                      'Hết hàng',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -1101,6 +1123,27 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                         ),
                       ),
                     ),
+                  // Badge hết hàng nếu !product.isAvailable
+                  if (!product.isAvailable)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade700,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text(
+                          'Hết hàng',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1157,11 +1200,11 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                         Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: primaryColor,
+                            color: product.isAvailable ? primaryColor : Colors.grey,
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: const Icon(
-                            Icons.add,
+                          child: Icon(
+                            product.isAvailable ? Icons.add : Icons.block,
                             color: Colors.white,
                             size: 16,
                           ),

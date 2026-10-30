@@ -7,6 +7,7 @@ class ProductModel {
   final String category;
   final String imageUrl;
   final bool isAvailable;
+  final bool isActive;
   final String? description;
   final DateTime? createdAt;
 
@@ -17,6 +18,7 @@ class ProductModel {
     required this.category,
     required this.imageUrl,
     this.isAvailable = true,
+    this.isActive = true,
     this.description,
     this.createdAt,
   });
@@ -28,6 +30,7 @@ class ProductModel {
       'category': category,
       'imageUrl': imageUrl,
       'isAvailable': isAvailable,
+      'isActive': isActive,
       'description': description ?? '',
       'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
     };
@@ -60,6 +63,12 @@ class ProductModel {
         ? true
         : (rawAvailable == true || rawAvailable.toString().toLowerCase() == 'true');
 
+    // Mặc định luôn là true nếu trên Firestore chưa set trường isActive
+    final rawActive = map['isActive'] ?? map['active'] ?? map['hienThi'];
+    final bool isActive = rawActive == null
+        ? true
+        : (rawActive == true || rawActive.toString().toLowerCase() == 'true');
+
     final description = map['description'] ?? map['desc'] ?? map['moTa'] ?? '';
 
     return ProductModel(
@@ -69,6 +78,7 @@ class ProductModel {
       category: category.toString(),
       imageUrl: imageUrl.toString(),
       isAvailable: isAvailable,
+      isActive: isActive,
       description: description.toString(),
       createdAt: created,
     );

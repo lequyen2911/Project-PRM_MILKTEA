@@ -1,25 +1,46 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../models/product_model.dart';
 import '../models/order_model.dart';
 
 class DatabaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance;
 
   /// Lấy danh sách sản phẩm theo thời gian thực (Realtime Stream) từ Firestore
-  /// Đọc trực tiếp từ collection 'products' trên database của bạn
-  Stream<List<ProductModel>> getProductsStream({String? category}) {
+  /// Nếu [onlyActive] là true, chỉ trả về các sản phẩm đang bật hiển thị (isActive == true) cho khách hàng.
+  Stream<List<ProductModel>> getProductsStream({String? category, bool onlyActive = false}) {
     return _firestore.collection('products').snapshots().map((snapshot) {
-      final list = snapshot.docs.map((doc) => ProductModel.fromFirestore(doc)).toList();
+      var list = snapshot.docs.map((doc) => ProductModel.fromFirestore(doc)).toList();
+
+      if (onlyActive) {
+        list = list.where((p) => p.isActive).toList();
+      }
 
       // Lọc theo danh mục nếu người dùng chọn
       if (category != null && category != 'Tất cả') {
-        return list
+        list = list
             .where((p) => p.category.toLowerCase() == category.toLowerCase())
             .toList();
       }
 
       return list;
     });
+  }
+
+  /// Tải ảnh sản phẩm lên Firebase Storage và trả về URL download
+  Future<String> uploadProductImage(File imageFile) async {
+    try {
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${imageFile.path.split('/').last}';
+      final ref = _storage.ref().child('product_images').child(fileName);
+      
+      final uploadTask = await ref.putFile(imageFile);
+      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      return downloadUrl;
+    } catch (e) {
+      throw Exception('Tải ảnh lên Firebase Storage thất bại: $e');
+    }
   }
 
   /// Lấy danh sách topping trực tiếp từ collection 'toppings' trên Firestore
@@ -63,6 +84,13 @@ class DatabaseService {
   Future<void> updateProductAvailability(String id, bool isAvailable) async {
     await _firestore.collection('products').doc(id).update({
       'isAvailable': isAvailable,
+    });
+  }
+
+  /// Cập nhật trạng thái hiển thị/ẩn (isActive) của món ăn
+  Future<void> updateProductActiveStatus(String id, bool isActive) async {
+    await _firestore.collection('products').doc(id).update({
+      'isActive': isActive,
     });
   }
 
