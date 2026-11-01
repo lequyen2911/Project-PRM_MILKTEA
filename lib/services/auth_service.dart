@@ -5,6 +5,9 @@ import 'package:flutter/foundation.dart';
 import '../models/user_model.dart';
 
 class AuthService {
+  /// Email tài khoản chủ quán: luôn được vào Kênh Quản Trị (phải khớp với firestore.rules)
+  static const String adminEmail = 'admin.tiemtranho@gmail.com';
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -55,7 +58,7 @@ class AuthService {
           final userDoc = await _firestore.collection('users').doc(user.uid).get();
           if (!userDoc.exists) {
             final String userEmail = (user.email ?? '').toLowerCase();
-            final String defaultRole = (userEmail == 'admin.tiemtranho@gmail.com') ? 'seller' : 'customer';
+            final String defaultRole = (userEmail == adminEmail) ? 'seller' : 'customer';
 
             await _firestore.collection('users').doc(user.uid).set({
               'uid': user.uid,
@@ -97,7 +100,7 @@ class AuthService {
         await user.updateDisplayName(name.trim());
 
         final String normalizedEmail = email.trim().toLowerCase();
-        final String finalRole = (normalizedEmail == 'admin.tiemtranho@gmail.com')
+        final String finalRole = (normalizedEmail == adminEmail)
             ? 'seller'
             : 'customer';
 
@@ -168,7 +171,23 @@ class AuthService {
     }
   }
 
-  // 4. Đăng xuất
+  // 4. Gửi email đặt lại mật khẩu (Firebase tự gửi email chứa link đặt mật khẩu mới).
+  // Trả về null nếu thành công, ngược lại là thông báo lỗi.
+  Future<String?> sendPasswordResetEmail(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email.trim());
+      return null;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'invalid-email') return 'Định dạng email không hợp lệ.';
+      if (e.code == 'user-not-found') return 'Không tìm thấy tài khoản với email này.';
+      if (e.code == 'too-many-requests') return 'Bạn đã gửi quá nhiều lần, vui lòng thử lại sau ít phút.';
+      return e.message ?? 'Không gửi được email đặt lại mật khẩu.';
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  // 5. Đăng xuất
   Future<void> signOut() async {
     try {
       await _googleSignIn.signOut();

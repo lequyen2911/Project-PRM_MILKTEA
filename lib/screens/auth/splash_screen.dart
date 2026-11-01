@@ -40,7 +40,7 @@ class SplashScreen extends StatelessWidget {
         final String userEmail = (user.email ?? '').trim().toLowerCase();
 
         // Tài khoản Admin cố định của hệ thống
-        final bool isAdminEmail = userEmail == 'admin.tiemtranho@gmail.com';
+        final bool isAdminEmail = userEmail == AuthService.adminEmail;
 
         // Đã đăng nhập -> Đọc role từ Firestore
         return FutureBuilder<DocumentSnapshot>(

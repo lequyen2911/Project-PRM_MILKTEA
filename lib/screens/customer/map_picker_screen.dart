@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import '../../utils/shipping_policy.dart';
 
 class MapPickerResult {
   final String address;
@@ -21,10 +22,24 @@ class MapPickerScreen extends StatefulWidget {
   final double? initialLat;
   final double? initialLng;
 
+  // Vị trí quán và bán kính giao: nếu có thì vẽ vùng giao hàng và báo khoảng cách tới quán
+  final LatLng? storeLocation;
+  final double? deliveryRadiusKm;
+
+  // Đổi chữ khi dùng cho Seller chọn vị trí quán
+  final String title;
+  final String pinLabel;
+  final String confirmLabel;
+
   const MapPickerScreen({
     super.key,
     this.initialLat,
     this.initialLng,
+    this.storeLocation,
+    this.deliveryRadiusKm,
+    this.title = 'Ghim Vị Trí Nhận Hàng',
+    this.pinLabel = 'Giao trà sữa tới đây',
+    this.confirmLabel = 'Xác Nhận Vị Trí Này',
   });
 
   @override
@@ -51,10 +66,10 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   @override
   void initState() {
     super.initState();
-    _currentCenter = LatLng(
-      widget.initialLat ?? 10.776889, // Mặc định TP.HCM / Hà Nội
-      widget.initialLng ?? 106.700806,
-    );
+    // Chưa ghim lần nào: mở bản đồ ở vị trí quán (nếu quán đã cài), không thì trung tâm TP.HCM
+    _currentCenter = (widget.initialLat != null && widget.initialLng != null)
+        ? LatLng(widget.initialLat!, widget.initialLng!)
+        : (widget.storeLocation ?? const LatLng(10.776889, 106.700806));
     _getAddressFromCoordinates(_currentCenter);
   }
 
@@ -66,23 +81,43 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     super.dispose();
   }
 
+  // Nhà mạng VN chặn *.openstreetmap.org (DNS trả 127.0.0.1), nên dùng Photon
+  // (dữ liệu OSM, không cần API key) để tìm kiếm và đổi tọa độ ra địa chỉ.
+  static const String _photonBaseUrl = 'https://photon.komoot.io';
+  static const Map<String, String> _httpHeaders = {
+    'User-Agent': 'TiemTraNhoMilkTeaApp/1.0 (contact: tiemtranho@gmail.com)',
+  };
+
+  // Ghép địa chỉ từ properties của Photon, vd: "Bitexco Financial Tower, 02 Hải Triều, Sài Gòn, Thành phố Hồ Chí Minh"
+  static String? _photonDisplayName(Map<String, dynamic> props) {
+    final street = [props['housenumber'], props['street']]
+        .where((part) => part != null && part.toString().isNotEmpty)
+        .join(' ');
+    final parts = <String>[];
+    for (final part in [props['name'], street, props['locality'], props['district'], props['city']]) {
+      final text = part?.toString() ?? '';
+      if (text.isNotEmpty && !parts.contains(text)) parts.add(text);
+    }
+    return parts.isEmpty ? null : parts.join(', ');
+  }
+
   // Phân tích tọa độ ra địa chỉ chữ (Reverse Geocoding)
   Future<void> _getAddressFromCoordinates(LatLng point) async {
     setState(() => _isLoadingAddress = true);
 
     try {
       final url = Uri.parse(
-        'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}&zoom=18&addressdetails=1',
+        '$_photonBaseUrl/reverse?lat=${point.latitude}&lon=${point.longitude}',
       );
 
-      final response = await http.get(
-        url,
-        headers: {'User-Agent': 'TiemTraNhoMilkTeaApp/1.0 (contact: tiemtranho@gmail.com)'},
-      ).timeout(const Duration(seconds: 5));
+      final response = await http.get(url, headers: _httpHeaders).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
-        final displayName = data['display_name'];
+        final List features = data['features'] ?? [];
+        final displayName = features.isEmpty
+            ? null
+            : _photonDisplayName(Map<String, dynamic>.from(features.first['properties']));
 
         if (mounted) {
           setState(() {
@@ -120,20 +155,29 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     });
 
     try {
+      // bbox giới hạn trong Việt Nam, lat/lon ưu tiên kết quả gần vị trí đang xem
       final url = Uri.parse(
-        'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(query)}&countrycodes=vn&limit=5&addressdetails=1',
+        '$_photonBaseUrl/api/?q=${Uri.encodeComponent(query)}&limit=5'
+        '&bbox=102.1,8.2,109.5,23.4&lat=${_currentCenter.latitude}&lon=${_currentCenter.longitude}',
       );
 
-      final response = await http.get(
-        url,
-        headers: {'User-Agent': 'TiemTraNhoMilkTeaApp/1.0 (contact: tiemtranho@gmail.com)'},
-      ).timeout(const Duration(seconds: 6));
+      final response = await http.get(url, headers: _httpHeaders).timeout(const Duration(seconds: 6));
 
       if (response.statusCode == 200) {
-        final List list = json.decode(utf8.decode(response.bodyBytes));
+        final data = json.decode(utf8.decode(response.bodyBytes));
+        final List features = data['features'] ?? [];
+        // Đưa về dạng {display_name, lat, lon} như Nominatim để phần UI giữ nguyên
+        final results = features.map((feature) {
+          final List coords = feature['geometry']['coordinates'];
+          return <String, dynamic>{
+            'display_name': _photonDisplayName(Map<String, dynamic>.from(feature['properties'])) ?? '',
+            'lat': coords[1],
+            'lon': coords[0],
+          };
+        }).toList();
         if (mounted) {
           setState(() {
-            _searchResults = list.map((item) => Map<String, dynamic>.from(item)).toList();
+            _searchResults = results;
             _isSearching = false;
           });
         }
@@ -164,6 +208,29 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     }
   }
 
+  // Dòng "Cách quán 2,3 km" (xanh) hoặc "Ngoài vùng giao hàng" (đỏ) dưới địa chỉ
+  Widget _buildDistanceInfo() {
+    final km = ShippingPolicy.distanceKm(widget.storeLocation!, _currentCenter);
+    final radius = widget.deliveryRadiusKm;
+    final outOfRange = radius != null && km > radius;
+    final color = outOfRange ? Colors.red.shade700 : Colors.green.shade700;
+
+    return Row(
+      children: [
+        Icon(outOfRange ? Icons.block_rounded : Icons.storefront_rounded, size: 16, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            outOfRange
+                ? 'Ngoài vùng giao hàng: cách quán ${ShippingPolicy.formatKm(km)} (quán giao tối đa ${ShippingPolicy.formatKm(radius)})'
+                : 'Cách quán ${ShippingPolicy.formatKm(km)}',
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: color),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _onPositionChanged(MapCamera camera, bool hasGesture) {
     if (hasGesture) {
       _currentCenter = camera.center;
@@ -178,9 +245,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Ghim Vị Trí Nhận Hàng',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+        title: Text(
+          widget.title,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
         backgroundColor: primaryBrown,
         foregroundColor: Colors.white,
@@ -188,7 +255,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       ),
       body: Stack(
         children: [
-          // Bản đồ OpenStreetMap
+          // Bản đồ Esri World Street Map (tile.openstreetmap.org bị nhà mạng VN chặn)
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -208,9 +275,43 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.projectgroup_milktea',
+                // Esri dùng thứ tự {z}/{y}/{x}
+                urlTemplate:
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+                userAgentPackageName: 'vn.tiemtranho.app',
               ),
+              // Vùng giao hàng quanh quán
+              if (widget.storeLocation != null && widget.deliveryRadiusKm != null)
+                CircleLayer(
+                  circles: [
+                    CircleMarker(
+                      point: widget.storeLocation!,
+                      radius: widget.deliveryRadiusKm! * 1000,
+                      useRadiusInMeter: true,
+                      color: accentOrange.withOpacity(0.08),
+                      borderColor: accentOrange.withOpacity(0.7),
+                      borderStrokeWidth: 2,
+                    ),
+                  ],
+                ),
+              if (widget.storeLocation != null)
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: widget.storeLocation!,
+                      width: 36,
+                      height: 36,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: primaryBrown,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 18),
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
 
@@ -234,14 +335,14 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                         ),
                       ],
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.local_cafe_rounded, color: Colors.white, size: 14),
-                        SizedBox(width: 4),
+                        const Icon(Icons.local_cafe_rounded, color: Colors.white, size: 14),
+                        const SizedBox(width: 4),
                         Text(
-                          'Giao trà sữa tới đây',
-                          style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                          widget.pinLabel,
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -422,14 +523,18 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                       height: 1.35,
                     ),
                   ),
+                  if (widget.storeLocation != null) ...[
+                    const SizedBox(height: 8),
+                    _buildDistanceInfo(),
+                  ],
                   const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.check_circle_rounded, size: 20),
-                      label: const Text(
-                        'Xác Nhận Vị Trí Này',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      label: Text(
+                        widget.confirmLabel,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryBrown,

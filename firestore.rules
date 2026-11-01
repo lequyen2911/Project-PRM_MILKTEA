@@ -1,0 +1,68 @@
+rules_version = '2';
+
+// Dán nội dung này vào Firebase Console → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdminEmail() {
+      return signedIn() && request.auth.token.email == 'admin.tiemtranho@gmail.com';
+    }
+
+    function isSeller() {
+      return isAdminEmail()
+        || (signedIn()
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'seller');
+    }
+
+    // Thực đơn: ai cũng xem được, chỉ Seller được thêm / sửa / xóa
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isSeller();
+    }
+
+    match /toppings/{toppingId} {
+      allow read: if true;
+      allow write: if isSeller();
+    }
+
+    // Hồ sơ người dùng: chỉ chính chủ (hoặc Seller) xem được.
+    // Khách tự sửa phone / address / name, nhưng không được tự đổi role.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSeller());
+      allow create: if signedIn() && request.auth.uid == uid
+        && (request.resource.data.role == 'customer'
+            || (request.resource.data.role == 'seller' && isAdminEmail()));
+      allow update: if isSeller()
+        || (signedIn() && request.auth.uid == uid
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'uid']));
+      allow delete: if isSeller();
+    }
+
+    // Cài đặt quán (vị trí, bán kính giao): ai đăng nhập cũng đọc được để tính phí ship, chỉ Seller sửa
+    match /settings/{settingId} {
+      allow read: if signedIn();
+      allow write: if isSeller();
+    }
+
+    // Đơn hàng: khách tạo đơn của chính mình (trạng thái Pending) và chỉ xem đơn của mình.
+    // Khách chỉ được hủy (Pending → Cancelled) khi quán chưa xác nhận.
+    // Seller xem tất cả đơn và đổi trạng thái, trừ đơn khách đã hủy.
+    match /orders/{orderId} {
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'Pending';
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isSeller());
+      allow update: if (isSeller() && resource.data.status != 'Cancelled')
+        || (signedIn()
+            && resource.data.userId == request.auth.uid
+            && resource.data.status == 'Pending'
+            && request.resource.data.status == 'Cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']));
+      allow delete: if isSeller();
+    }
+  }
+}

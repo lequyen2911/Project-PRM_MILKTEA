@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../models/cart_item_model.dart';
+import '../../models/store_settings_model.dart';
 import '../../providers/cart_provider.dart';
 import '../../services/database_service.dart';
+import '../../utils/shipping_policy.dart';
 import 'map_picker_screen.dart';
 import 'order_history_screen.dart';
 
@@ -29,21 +33,32 @@ class _CartScreenState extends State<CartScreen> {
   double? _selectedLng;
   String? _mapAddressText;
 
-  String _paymentMethod = 'COD'; // 'COD' hoặc 'BANKING'
+  final String _paymentMethod = 'COD'; // Hiện chỉ hỗ trợ COD
   bool _isSubmitting = false;
 
   static const Color primaryBrown = Color(0xFF6D4C41);
   static const Color accentOrange = Color(0xFFD87D4A);
   static const Color creamBg = Color(0xFFFBF8F5);
 
+  // Vị trí quán & bán kính giao (null nếu Seller chưa cài: khi đó phí ship tính theo giá trị đơn)
+  StoreSettings? _storeSettings;
+  StreamSubscription<StoreSettings?>? _storeSettingsSub;
+
   @override
   void initState() {
     super.initState();
     _loadUserInfo();
+    _storeSettingsSub = _dbService.getStoreSettingsStream().listen(
+      (settings) {
+        if (mounted) setState(() => _storeSettings = settings);
+      },
+      onError: (_) {}, // Không đọc được cài đặt quán thì vẫn cho đặt hàng với phí theo giá trị đơn
+    );
   }
 
   @override
   void dispose() {
+    _storeSettingsSub?.cancel();
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
@@ -78,19 +93,41 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
-  // Tính phí vận chuyển theo nấc giá trị đơn hàng:
-  // - Đơn hàng dưới 50.000đ: 15.000đ ship
-  // - Từ 50.000đ đến 100.000đ: 10.000đ ship
-  // - Trên 100.000đ: Miễn phí ship (0đ)
+  // Khoảng cách từ quán tới vị trí khách ghim (null nếu quán chưa cài vị trí hoặc khách chưa ghim)
+  double? get _distanceKm {
+    if (_storeSettings == null || _selectedLat == null || _selectedLng == null) return null;
+    return ShippingPolicy.distanceKm(_storeSettings!.location, LatLng(_selectedLat!, _selectedLng!));
+  }
+
+  bool get _isOutOfDeliveryRange {
+    final km = _distanceKm;
+    return km != null && km > _storeSettings!.deliveryRadiusKm;
+  }
+
+  // Phí vận chuyển (quy tắc chi tiết ở ShippingPolicy):
+  // - Quán đã cài vị trí: theo km từ quán tới vị trí khách ghim
+  // - Quán chưa cài vị trí: theo giá trị đơn như trước
   int _calculateShippingFee(int subtotal) {
-    if (subtotal == 0) return 0;
-    if (subtotal < 50000) {
-      return 15000;
-    } else if (subtotal <= 100000) {
-      return 10000;
-    } else {
-      return 0;
+    if (_storeSettings == null) return ShippingPolicy.feeByOrderValue(subtotal);
+    // Chưa ghim vị trí: tạm tính mức thấp nhất (3 km đầu), ghim xong mới tính đúng theo km
+    return ShippingPolicy.feeByDistance(distanceKm: _distanceKm ?? 0, subtotal: subtotal);
+  }
+
+  // Nhãn nhỏ cạnh dòng "Phí giao hàng"
+  ({String text, Color color, Color background}) _shippingFeeTag(int shippingFee) {
+    if (_storeSettings == null) {
+      if (shippingFee == 0) return (text: 'Freeship (>100k)', color: Colors.green.shade700, background: Colors.green.shade50);
+      if (shippingFee == 10000) return (text: 'Ưu đãi 10k (50k-100k)', color: Colors.blue.shade700, background: Colors.blue.shade50);
+      return (text: '15k (<50k)', color: Colors.orange.shade800, background: Colors.orange.shade50);
     }
+    final km = _distanceKm;
+    if (km == null) {
+      return (text: 'Tạm tính, ghim vị trí để tính theo km', color: Colors.orange.shade800, background: Colors.orange.shade50);
+    }
+    if (shippingFee == 0) {
+      return (text: 'Freeship • ${ShippingPolicy.formatKm(km)}', color: Colors.green.shade700, background: Colors.green.shade50);
+    }
+    return (text: ShippingPolicy.formatKm(km), color: Colors.blue.shade700, background: Colors.blue.shade50);
   }
 
   // Xử lý đặt hàng
@@ -134,6 +171,19 @@ class _CartScreenState extends State<CartScreen> {
       return;
     }
 
+    // Quán đã cài vùng giao hàng: không nhận đơn ngoài bán kính
+    if (_isOutOfDeliveryRange) {
+      _showCheckoutNotice(
+        icon: Icons.wrong_location_outlined,
+        iconColor: Colors.red,
+        title: 'Ngoài Vùng Giao Hàng',
+        message: 'Vị trí bạn ghim cách quán ${ShippingPolicy.formatKm(_distanceKm!)}, '
+            'trong khi quán chỉ giao trong ${ShippingPolicy.formatKm(_storeSettings!.deliveryRadiusKm)}. '
+            'Vui lòng ghim lại vị trí gần quán hơn.',
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     try {
@@ -142,48 +192,74 @@ class _CartScreenState extends State<CartScreen> {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
       }
 
-      // 1. Kiểm tra lại trạng thái stock (isAvailable) và active (isActive) của từng sản phẩm trong giỏ hàng từ Firestore
+      // 1. Kiểm tra lại từng ly trong giỏ với dữ liệu mới nhất trên Firestore:
+      //    món và topping còn bán không, giá có đổi không
+      final freshToppings = await _dbService.getToppingsById();
+      final priceChanges = <String>[];
+
       for (var item in cart.itemList) {
         final freshProduct = await _dbService.getProductById(item.productId);
+
+        String? soldOutMessage;
         if (freshProduct == null || !freshProduct.isActive || !freshProduct.isAvailable) {
+          soldOutMessage = 'Món "${item.productName}" hiện đã hết hàng hoặc không còn bán.';
+        } else {
+          final soldOutToppingIds = item.toppingPrices.keys.where((id) {
+            final topping = freshToppings[id];
+            return topping == null || !DatabaseService.isToppingAvailable(topping);
+          }).toList();
+          if (soldOutToppingIds.isNotEmpty) {
+            final names = soldOutToppingIds
+                .map((id) => freshToppings[id]?['name']?.toString() ?? 'một topping')
+                .join(', ');
+            soldOutMessage = 'Topping $names của món "${item.productName}" hiện đã hết.';
+          }
+        }
+
+        if (soldOutMessage != null) {
           if (!mounted) return;
           setState(() => _isSubmitting = false);
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Row(
-                children: [
-                  Icon(Icons.error_outline, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Sản Phẩm Hết Hàng', style: TextStyle(color: Colors.red, fontSize: 16)),
-                ],
-              ),
-              content: Text(
-                'Món "${item.productName}" trong giỏ hàng hiện đã hết hàng hoặc không còn hoạt động. Vui lòng xóa món này khỏi giỏ hàng trước khi tiếp tục đặt hàng.',
-                style: const TextStyle(fontSize: 14, height: 1.4),
-              ),
-              actions: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryBrown,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Đã hiểu'),
-                ),
-              ],
-            ),
+          _showCheckoutNotice(
+            icon: Icons.error_outline,
+            iconColor: Colors.red,
+            title: 'Sản Phẩm Hết Hàng',
+            message: '$soldOutMessage Vui lòng xóa ly này khỏi giỏ hàng (có thể chọn lại với topping khác) trước khi đặt hàng.',
           );
           return;
         }
+
+        // Quán đã đổi giá món hoặc topping sau lúc khách thêm vào giỏ: cập nhật giỏ theo giá mới
+        final oldUnitPrice = item.formattedUnitPrice;
+        final changed = cart.updatePrices(
+          item.id,
+          basePrice: freshProduct!.basePrice,
+          toppingPrices: {
+            for (final id in item.toppingPrices.keys) id: (freshToppings[id]!['price'] as num).toInt(),
+          },
+        );
+        if (changed) {
+          priceChanges.add('• ${item.productName}: $oldUnitPrice → ${cart.items[item.id]!.formattedUnitPrice} / ly');
+        }
+      }
+
+      // Có giá thay đổi thì dừng lại để khách xem tổng tiền mới rồi mới đặt
+      if (priceChanges.isNotEmpty) {
+        if (!mounted) return;
+        setState(() => _isSubmitting = false);
+        _showCheckoutNotice(
+          icon: Icons.price_change_outlined,
+          iconColor: accentOrange,
+          title: 'Giá Đã Thay Đổi',
+          message: 'Quán vừa cập nhật giá:\n${priceChanges.join('\n')}\n\n'
+              'Giỏ hàng đã được cập nhật, bạn kiểm tra lại tổng tiền rồi bấm đặt hàng nhé.',
+        );
+        return;
       }
 
       final user = FirebaseAuth.instance.currentUser;
       final now = DateTime.now();
-      final randomSuffix = (now.millisecondsSinceEpoch % 100000).toString().padLeft(5, '0');
-      final orderCode = 'TS$randomSuffix';
+      // Mã theo mili-giây ở hệ 36 (vd: TSMHE4K2X1): không lặp lại như cách lấy 5 số cuối cũ
+      final orderCode = 'TS${now.millisecondsSinceEpoch.toRadixString(36).toUpperCase()}';
 
       final int subtotal = cart.totalAmount;
       final int shippingFee = _calculateShippingFee(subtotal);
@@ -204,6 +280,8 @@ class _CartScreenState extends State<CartScreen> {
         'items': cart.itemList.map((item) => item.toOrderItemModel().toMap()).toList(),
         'subtotal': subtotal,
         'shippingFee': shippingFee,
+        // Khoảng cách đường chim bay từ quán (km, làm tròn 2 số lẻ); null nếu quán chưa cài vị trí
+        'distanceKm': _distanceKm == null ? null : double.parse(_distanceKm!.toStringAsFixed(2)),
         'totalAmount': totalAmount,
         'status': 'Pending',
         'createdAt': FieldValue.serverTimestamp(),
@@ -245,6 +323,41 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
+  // Hộp thoại báo cho khách khi kiểm tra giỏ hàng lúc đặt (hết hàng, đổi giá)
+  void _showCheckoutNotice({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String message,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(icon, color: iconColor),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(title, style: TextStyle(color: iconColor, fontSize: 16)),
+            ),
+          ],
+        ),
+        content: Text(message, style: const TextStyle(fontSize: 14, height: 1.4)),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryBrown,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Đã hiểu'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showSuccessDialog(String orderCode, int totalAmount) {
     showDialog(
       context: context,
@@ -253,70 +366,72 @@ class _CartScreenState extends State<CartScreen> {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           contentPadding: const EdgeInsets.all(24),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 50),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Đặt Hàng Thành Công! 🎉',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: primaryBrown),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Mã đơn hàng: #$orderCode',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: accentOrange),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Tổng thanh toán: ${CartItemModel.formatVnd(totalAmount)}',
-                style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Quán đã nhận được đơn hàng và đang chuẩn bị những ly trà sữa thơm ngon nhất cho bạn!',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.4),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.receipt_long_rounded),
-                  label: const Text('Xem đơn hàng của tôi'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryBrown,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    shape: BoxShape.circle,
                   ),
-                  onPressed: () {
-                    Navigator.pop(ctx); // đóng dialog
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
-                    );
-                  },
+                  child: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 50),
                 ),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  Navigator.pop(context); // Trở về màn hình chính
-                },
-                child: const Text('Tiếp tục đặt món', style: TextStyle(color: primaryBrown)),
-              ),
-            ],
+                const SizedBox(height: 16),
+                const Text(
+                  'Đặt Hàng Thành Công! 🎉',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: primaryBrown),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Mã đơn hàng: #$orderCode',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: accentOrange),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Tổng thanh toán: ${CartItemModel.formatVnd(totalAmount)}',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Quán đã nhận được đơn hàng và đang chuẩn bị những ly trà sữa thơm ngon nhất cho bạn!',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.4),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.receipt_long_rounded),
+                    label: const Text('Xem đơn hàng của tôi'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryBrown,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx); // đóng dialog
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.pop(context); // Trở về màn hình chính
+                  },
+                  child: const Text('Tiếp tục đặt món', style: TextStyle(color: primaryBrown)),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -809,18 +924,56 @@ class _CartScreenState extends State<CartScreen> {
             builder: (_) => MapPickerScreen(
               initialLat: _selectedLat,
               initialLng: _selectedLng,
+              storeLocation: _storeSettings?.location,
+              deliveryRadiusKm: _storeSettings?.deliveryRadiusKm,
             ),
           ),
         );
 
-        if (result != null) {
-          setState(() {
-            _selectedLat = result.latitude;
-            _selectedLng = result.longitude;
-            _mapAddressText = result.address;
-            _addressController.text = result.address;
-          });
+        if (result == null || !mounted) return;
+
+        // Chỉ tự điền khi ô địa chỉ trống hoặc vẫn là địa chỉ lấy từ lần ghim trước.
+        // Nếu khách đã tự gõ (số nhà, hẻm...) thì hỏi trước, tránh mất phần đã nhập.
+        final typedAddress = _addressController.text.trim();
+        bool replaceAddress = typedAddress.isEmpty || typedAddress == _mapAddressText;
+        if (!replaceAddress) {
+          replaceAddress = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  title: const Text('Thay địa chỉ đã nhập?', style: TextStyle(fontSize: 16)),
+                  content: Text(
+                    'Địa chỉ theo vị trí vừa ghim:\n${result.address}\n\nBạn muốn thay địa chỉ đang nhập bằng địa chỉ này không?',
+                    style: const TextStyle(fontSize: 14, height: 1.4),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Giữ địa chỉ của tôi'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryBrown,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Thay'),
+                    ),
+                  ],
+                ),
+              ) ??
+              false;
         }
+        if (!mounted) return;
+
+        setState(() {
+          _selectedLat = result.latitude;
+          _selectedLng = result.longitude;
+          _mapAddressText = result.address;
+          if (replaceAddress) {
+            _addressController.text = result.address;
+          }
+        });
       },
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -902,6 +1055,20 @@ class _CartScreenState extends State<CartScreen> {
                       height: 1.25,
                     ),
                   ),
+                  if (_distanceKm != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _isOutOfDeliveryRange
+                          ? '⛔ Ngoài vùng giao: cách quán ${ShippingPolicy.formatKm(_distanceKm!)} '
+                              '(tối đa ${ShippingPolicy.formatKm(_storeSettings!.deliveryRadiusKm)})'
+                          : 'Cách quán ${ShippingPolicy.formatKm(_distanceKm!)}',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: _isOutOfDeliveryRange ? Colors.red.shade700 : Colors.green.shade800,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1038,35 +1205,37 @@ class _CartScreenState extends State<CartScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
+              Expanded(
+                child: Row(
                 children: [
                   Text('Phí giao hàng', style: TextStyle(color: Colors.grey.shade700, fontSize: 13.5)),
                   if (subtotal > 0) ...[
                     const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: shippingFee == 0
-                            ? Colors.green.shade50
-                            : (shippingFee == 10000 ? Colors.blue.shade50 : Colors.orange.shade50),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        shippingFee == 0
-                            ? 'Freeship (>100k)'
-                            : (shippingFee == 10000 ? 'Ưu đãi 10k (50k-100k)' : '15k (<50k)'),
-                        style: TextStyle(
-                          color: shippingFee == 0
-                              ? Colors.green.shade700
-                              : (shippingFee == 10000 ? Colors.blue.shade700 : Colors.orange.shade800),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                    Flexible(
+                      child: Builder(builder: (context) {
+                        final tag = _shippingFeeTag(shippingFee);
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: tag.background,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            tag.text,
+                            style: TextStyle(
+                              color: tag.color,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        );
+                      }),
                     ),
                   ],
                 ],
+                ),
               ),
+              const SizedBox(width: 8),
               Text(
                 shippingFee == 0 ? '0 đ' : CartItemModel.formatVnd(shippingFee),
                 style: TextStyle(

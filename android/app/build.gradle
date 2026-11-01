@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.example.projectgroup_milktea"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 34
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

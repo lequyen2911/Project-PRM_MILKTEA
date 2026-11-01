@@ -25,6 +25,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final AuthService _authService = AuthService();
 
+  static const Color primaryBrown = Color(0xFF6D4C41);
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -111,6 +113,97 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Quên mật khẩu: nhập email → Firebase gửi link đặt lại mật khẩu
+  Future<void> _showForgotPasswordDialog() async {
+    final emailController = TextEditingController(text: _emailController.text.trim());
+    final dialogFormKey = GlobalKey<FormState>();
+    bool isSending = false;
+    String? errorText;
+
+    final sentTo = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Quên Mật Khẩu', style: TextStyle(fontWeight: FontWeight.bold, color: primaryBrown)),
+          content: Form(
+            key: dialogFormKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Nhập email đã đăng ký, chúng tôi sẽ gửi link để bạn đặt mật khẩu mới.',
+                  style: TextStyle(fontSize: 13.5, height: 1.4),
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    prefixIcon: const Icon(Icons.email_outlined, color: primaryBrown),
+                    border: const OutlineInputBorder(),
+                    errorText: errorText,
+                    errorMaxLines: 2,
+                  ),
+                  validator: (value) {
+                    final email = value?.trim() ?? '';
+                    if (email.isEmpty) return 'Vui lòng nhập email';
+                    if (!email.contains('@')) return 'Định dạng email không hợp lệ';
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSending ? null : () => Navigator.pop(ctx),
+              child: const Text('Hủy', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: primaryBrown, foregroundColor: Colors.white),
+              onPressed: isSending
+                  ? null
+                  : () async {
+                      if (!dialogFormKey.currentState!.validate()) return;
+                      setDialogState(() {
+                        isSending = true;
+                        errorText = null;
+                      });
+                      final email = emailController.text.trim();
+                      final error = await _authService.sendPasswordResetEmail(email);
+                      if (!ctx.mounted) return;
+                      if (error == null) {
+                        Navigator.pop(ctx, email);
+                      } else {
+                        setDialogState(() {
+                          isSending = false;
+                          errorText = error;
+                        });
+                      }
+                    },
+              child: isSending
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Gửi link'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Đợi hiệu ứng đóng dialog xong rồi mới dispose controller
+    Future.delayed(const Duration(milliseconds: 400), emailController.dispose);
+
+    if (sentTo != null) {
+      _showSuccessSnackBar('Đã gửi link đặt lại mật khẩu tới $sentTo. Kiểm tra cả hộp thư Spam nhé!');
+    }
+  }
+
   // Xử lý Đăng nhập Google
   Future<void> _handleGoogleSignIn() async {
     setState(() {
@@ -132,7 +225,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const primaryBrown = Color(0xFF6D4C41);
     const bgCream = Color(0xFFFAF6F0);
 
     return Scaffold(
@@ -279,6 +371,18 @@ class _LoginScreenState extends State<LoginScreen> {
                                 return null;
                               },
                             ),
+
+                            if (_isLoginMode)
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: _isLoading ? null : _showForgotPasswordDialog,
+                                  child: const Text(
+                                    'Quên mật khẩu?',
+                                    style: TextStyle(color: primaryBrown, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ),
 
                             // 4. Trường Xác nhận mật khẩu (chỉ hiện khi Đăng ký)
                             if (!_isLoginMode) ...[

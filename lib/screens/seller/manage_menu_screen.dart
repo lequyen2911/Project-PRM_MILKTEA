@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/product_model.dart';
@@ -20,6 +21,54 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
 
   static const Color primaryBrown = Color(0xFF6D4C41);
   static const Color accentOrange = Color(0xFFD87D4A);
+
+  // Danh mục của thực đơn mẫu, luôn có trong danh sách chọn
+  static const List<String> _defaultCategories = ['Trà sữa', 'Trà trái cây'];
+  static const String _newCategoryOption = '__new_category__';
+
+  // Danh mục đang có, cập nhật mỗi khi danh sách đồ uống thay đổi.
+  // Seller chọn từ đây thay vì gõ tự do, để trang khách không bị "trà sữa" / "Trà sữa" thành 2 nút lọc.
+  List<String> _knownCategories = [..._defaultCategories];
+
+  /// Thêm các danh mục trong [extra] vào [base], bỏ qua chuỗi rỗng và trùng (không phân biệt hoa thường)
+  static List<String> _withCategories(List<String> base, Iterable<String> extra) {
+    final result = [...base];
+    for (final raw in extra) {
+      final category = raw.trim();
+      if (category.isNotEmpty && !result.any((c) => c.toLowerCase() == category.toLowerCase())) {
+        result.add(category);
+      }
+    }
+    return result;
+  }
+
+  /// Trả về cách viết đã có của danh mục (vd: "trà sữa" → "Trà sữa"), hoặc tên đã bỏ khoảng trắng thừa
+  static String _canonicalCategory(List<String> options, String name) {
+    final trimmed = name.trim();
+    return options.firstWhere(
+      (c) => c.toLowerCase() == trimmed.toLowerCase(),
+      orElse: () => trimmed,
+    );
+  }
+
+  // Giới hạn 1080px: ảnh chụp điện thoại (~4000px, vài MB) còn khoảng 100–300 KB,
+  // upload nhanh hơn và khách tải menu cũng nhẹ hơn
+  Future<XFile?> _pickMenuImage() => ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1080,
+        maxHeight: 1080,
+        imageQuality: 80,
+      );
+
+  // Đợi hiệu ứng đóng dialog chạy xong rồi mới dispose,
+  // tránh lỗi "TextEditingController was used after being disposed"
+  void _disposeAfterDialogClosed(List<TextEditingController> controllers) {
+    Future.delayed(const Duration(milliseconds: 400), () {
+      for (final controller in controllers) {
+        controller.dispose();
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -174,8 +223,11 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
     final nameController = TextEditingController(text: product?.name ?? '');
     final priceController =
         TextEditingController(text: product != null ? product.basePrice.toString() : '');
-    final categoryController =
-        TextEditingController(text: product?.category ?? 'Trà sữa');
+    final categoryOptions = _withCategories(_knownCategories, [product?.category ?? '']);
+    String selectedCategory = product == null
+        ? categoryOptions.first
+        : _canonicalCategory(categoryOptions, product.category);
+    final newCategoryController = TextEditingController();
     final imageController = TextEditingController(text: product?.imageUrl ?? '');
     final descController = TextEditingController(text: product?.description ?? '');
     bool isAvailable = product?.isAvailable ?? true;
@@ -184,6 +236,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
     XFile? pickedImageFile;
     final formKey = GlobalKey<FormState>();
     bool isSubmitting = false;
+    String? saveError;
 
     showDialog(
       context: context,
@@ -238,11 +291,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                                     onPressed: isSubmitting
                                         ? null
                                         : () async {
-                                            final picker = ImagePicker();
-                                            final picked = await picker.pickImage(
-                                              source: ImageSource.gallery,
-                                              imageQuality: 80,
-                                            );
+                                            final picked = await _pickMenuImage();
                                             if (picked != null) {
                                               setDialogState(() {
                                                 pickedImageFile = picked;
@@ -283,40 +332,73 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                         TextFormField(
                           controller: priceController,
                           keyboardType: TextInputType.number,
+                          // Chỉ nhận chữ số: gõ "30.000" sẽ thành 30000
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                           decoration: const InputDecoration(
                             labelText: 'Giá bán (VNĐ) *',
+                            hintText: 'VD: 30000',
                             prefixIcon: Icon(Icons.attach_money, color: primaryBrown),
                             border: OutlineInputBorder(),
                           ),
                           validator: (val) {
-                            if (val == null || val.trim().isEmpty) {
-                              return 'Vui lòng nhập giá';
-                            }
-                            final p = int.tryParse(val.trim());
-                            if (p == null || p < 0) {
-                              return 'Giá tiền không hợp lệ';
+                            final p = int.tryParse(val?.trim() ?? '');
+                            if (p == null || p <= 0) {
+                              return 'Vui lòng nhập giá lớn hơn 0';
                             }
                             return null;
                           },
                         ),
                         const SizedBox(height: 12),
 
-                        // Danh mục
-                        TextFormField(
-                          controller: categoryController,
+                        // Danh mục: chọn từ danh sách có sẵn hoặc thêm mới
+                        DropdownButtonFormField<String>(
+                          value: selectedCategory,
+                          isExpanded: true,
                           decoration: const InputDecoration(
                             labelText: 'Danh mục *',
-                            hintText: 'VD: Trà sữa, Trà trái cây...',
                             prefixIcon: Icon(Icons.category, color: primaryBrown),
                             border: OutlineInputBorder(),
                           ),
-                          validator: (val) {
-                            if (val == null || val.trim().isEmpty) {
-                              return 'Vui lòng nhập danh mục';
-                            }
-                            return null;
-                          },
+                          items: [
+                            ...categoryOptions.map(
+                              (c) => DropdownMenuItem(value: c, child: Text(c)),
+                            ),
+                            const DropdownMenuItem(
+                              value: _newCategoryOption,
+                              child: Text(
+                                '+ Danh mục mới...',
+                                style: TextStyle(color: accentOrange, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                          onChanged: isSubmitting
+                              ? null
+                              : (val) => setDialogState(() => selectedCategory = val!),
                         ),
+                        if (selectedCategory == _newCategoryOption) ...[
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: newCategoryController,
+                            textCapitalization: TextCapitalization.sentences,
+                            decoration: const InputDecoration(
+                              labelText: 'Tên danh mục mới *',
+                              hintText: 'VD: Cà phê',
+                              prefixIcon: Icon(Icons.create_new_folder_outlined, color: primaryBrown),
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (val) {
+                              final name = val?.trim() ?? '';
+                              if (name.isEmpty) {
+                                return 'Vui lòng nhập tên danh mục';
+                              }
+                              // Trang khách đã có tab "Topping" riêng
+                              if (name.toLowerCase() == 'topping') {
+                                return '"Topping" là tab riêng, hãy đặt tên khác';
+                              }
+                              return null;
+                            },
+                          ),
+                        ],
                         const SizedBox(height: 12),
 
                         // Link hình ảnh (hoặc URL tự động sau khi upload)
@@ -327,6 +409,8 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                             prefixIcon: Icon(Icons.image, color: primaryBrown),
                             border: OutlineInputBorder(),
                           ),
+                          // Dán link mới thì bỏ ảnh đã chọn từ máy và cập nhật khung xem trước
+                          onChanged: (_) => setDialogState(() => pickedImageFile = null),
                         ),
                         const SizedBox(height: 12),
 
@@ -381,6 +465,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                             });
                           },
                         ),
+                        if (saveError != null) _buildSaveError(saveError!),
                       ],
                     ),
                   ),
@@ -401,12 +486,18 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                       ? null
                       : () async {
                           if (!formKey.currentState!.validate()) return;
-                          setDialogState(() => isSubmitting = true);
+                          setDialogState(() {
+                            isSubmitting = true;
+                            saveError = null;
+                          });
 
                           String imageUrl = imageController.text.trim();
+                          final category = selectedCategory == _newCategoryOption
+                              ? _canonicalCategory(categoryOptions, newCategoryController.text)
+                              : selectedCategory;
 
                           try {
-                            // Nếu có chọn ảnh mới từ điện thoại, tiến hành upload lên Firebase Storage
+                            // Nếu có chọn ảnh mới từ điện thoại, upload lên Cloudinary để lấy link
                             if (pickedImageFile != null) {
                               imageUrl = await _dbService.uploadProductImage(File(pickedImageFile!.path));
                             }
@@ -414,7 +505,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                             final data = {
                               'name': nameController.text.trim(),
                               'basePrice': int.parse(priceController.text.trim()),
-                              'category': categoryController.text.trim(),
+                              'category': category,
                               'imageUrl': imageUrl,
                               'description': descController.text.trim(),
                               'isAvailable': isAvailable,
@@ -433,8 +524,11 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                               Navigator.pop(ctx);
                             }
                           } catch (e) {
-                            setDialogState(() => isSubmitting = false);
-                            _showSnackBar('❌ Lỗi khi lưu dữ liệu: $e', isError: true);
+                            // Hiện lỗi ngay trong form, SnackBar ở màn hình phía sau bị lớp mờ của dialog che
+                            setDialogState(() {
+                              isSubmitting = false;
+                              saveError = 'Lỗi khi lưu dữ liệu: $e';
+                            });
                           }
                         },
                   child: isSubmitting
@@ -450,6 +544,39 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
           },
         );
       },
+    ).then((_) => _disposeAfterDialogClosed([
+          nameController,
+          priceController,
+          newCategoryController,
+          imageController,
+          descController,
+        ]));
+  }
+
+  // Khung báo lỗi đỏ ở cuối form thêm / sửa
+  Widget _buildSaveError(String message) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, color: Colors.red.shade700, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: Colors.red.shade800, fontSize: 12.5, height: 1.35),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -474,6 +601,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
     XFile? pickedToppingImage;
     final formKey = GlobalKey<FormState>();
     bool isSubmitting = false;
+    String? saveError;
 
     showDialog(
       context: context,
@@ -528,11 +656,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                                     onPressed: isSubmitting
                                         ? null
                                         : () async {
-                                            final picker = ImagePicker();
-                                            final picked = await picker.pickImage(
-                                              source: ImageSource.gallery,
-                                              imageQuality: 80,
-                                            );
+                                            final picked = await _pickMenuImage();
                                             if (picked != null) {
                                               setDialogState(() {
                                                 pickedToppingImage = picked;
@@ -568,18 +692,17 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                         TextFormField(
                           controller: priceController,
                           keyboardType: TextInputType.number,
+                          // Chỉ nhận chữ số: gõ "5.000" sẽ thành 5000
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                           decoration: const InputDecoration(
                             labelText: 'Giá topping (VNĐ) *',
+                            hintText: 'VD: 5000 (nhập 0 nếu tặng kèm)',
                             prefixIcon: Icon(Icons.attach_money, color: primaryBrown),
                             border: OutlineInputBorder(),
                           ),
                           validator: (val) {
-                            if (val == null || val.trim().isEmpty) {
-                              return 'Vui lòng nhập giá';
-                            }
-                            final p = int.tryParse(val.trim());
-                            if (p == null || p < 0) {
-                              return 'Giá tiền không hợp lệ';
+                            if (int.tryParse(val?.trim() ?? '') == null) {
+                              return 'Vui lòng nhập giá (chỉ gõ số)';
                             }
                             return null;
                           },
@@ -590,10 +713,12 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                         TextFormField(
                           controller: imageController,
                           decoration: const InputDecoration(
-                            labelText: 'Link hình ảnh (URL)',
+                            labelText: 'Link hình ảnh (URL hoặc tự tải lên)',
                             prefixIcon: Icon(Icons.image, color: primaryBrown),
                             border: OutlineInputBorder(),
                           ),
+                          // Dán link mới thì bỏ ảnh đã chọn từ máy và cập nhật khung xem trước
+                          onChanged: (_) => setDialogState(() => pickedToppingImage = null),
                         ),
                         const SizedBox(height: 12),
 
@@ -624,6 +749,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                             });
                           },
                         ),
+                        if (saveError != null) _buildSaveError(saveError!),
                       ],
                     ),
                   ),
@@ -644,11 +770,15 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                       ? null
                       : () async {
                           if (!formKey.currentState!.validate()) return;
-                          setDialogState(() => isSubmitting = true);
+                          setDialogState(() {
+                            isSubmitting = true;
+                            saveError = null;
+                          });
 
                           String imageUrl = imageController.text.trim();
 
                           try {
+                            // Nếu có chọn ảnh mới từ điện thoại, upload lên Cloudinary để lấy link
                             if (pickedToppingImage != null) {
                               imageUrl = await _dbService.uploadProductImage(File(pickedToppingImage!.path));
                             }
@@ -673,8 +803,10 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                               Navigator.pop(ctx);
                             }
                           } catch (e) {
-                            setDialogState(() => isSubmitting = false);
-                            _showSnackBar('❌ Lỗi khi lưu topping: $e', isError: true);
+                            setDialogState(() {
+                              isSubmitting = false;
+                              saveError = 'Lỗi khi lưu topping: $e';
+                            });
                           }
                         },
                   child: isSubmitting
@@ -690,7 +822,12 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
           },
         );
       },
-    );
+    ).then((_) => _disposeAfterDialogClosed([
+          nameController,
+          priceController,
+          imageController,
+          descController,
+        ]));
   }
 
   @override
@@ -778,6 +915,7 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
         }
 
         final products = snapshot.data ?? [];
+        _knownCategories = _withCategories(_defaultCategories, products.map((p) => p.category));
         if (products.isEmpty) {
           return Center(
             child: Column(
@@ -890,7 +1028,10 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Row(
+                          // Wrap thay vì Row: cột này hẹp (~90px) nên 2 nhãn tự xuống dòng khi không đủ chỗ
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 2,
                             children: [
                               Text(
                                 product.isActive ? '👁️ Hiển thị' : '🔒 Đã ẩn',
@@ -900,7 +1041,6 @@ class _ManageMenuScreenState extends State<ManageMenuScreen>
                                   color: product.isActive ? Colors.blue.shade700 : Colors.grey,
                                 ),
                               ),
-                              const SizedBox(width: 10),
                               Text(
                                 product.isAvailable ? '🟢 Còn hàng' : '🔴 Hết hàng',
                                 style: TextStyle(

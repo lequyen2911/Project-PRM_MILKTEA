@@ -102,7 +102,7 @@ class OrderModel {
   final String? customerPhone;
   final List<OrderItemModel> items;
   final int totalAmount;
-  final String status; // 'Pending', 'Preparing', 'Completed', ...
+  final String status; // 'Pending', 'Preparing', 'Completed', 'Cancelled' (khách hủy khi còn Pending)
   final DateTime? createdAt;
 
   OrderModel({
@@ -223,8 +223,13 @@ class OrderModel {
         return 'Đang chuẩn bị';
       case 'Completed':
         return 'Đã hoàn thành';
+      case 'Cancelled':
+        return 'Đã hủy';
       default:
         return status;
     }
   }
+
+  /// Khách chỉ được hủy khi quán chưa xác nhận (firestore.rules cũng chặn như vậy)
+  bool get canCustomerCancel => status == 'Pending';
 }

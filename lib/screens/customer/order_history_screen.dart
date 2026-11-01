@@ -13,6 +13,7 @@ class OrderHistoryScreen extends StatefulWidget {
 class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   final DatabaseService _dbService = DatabaseService();
   String _selectedFilter = 'Tất cả';
+  final Set<String> _cancellingOrderIds = {};
 
   static const Color primaryBrown = Color(0xFF6D4C41);
   static const Color accentOrange = Color(0xFFD87D4A);
@@ -26,6 +27,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return Colors.blue.shade700;
       case 'Completed':
         return Colors.green.shade700;
+      case 'Cancelled':
+        return Colors.red.shade700;
       default:
         return Colors.grey.shade700;
     }
@@ -39,6 +42,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return Colors.blue.shade50;
       case 'Completed':
         return Colors.green.shade50;
+      case 'Cancelled':
+        return Colors.red.shade50;
       default:
         return Colors.grey.shade100;
     }
@@ -52,8 +57,64 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return Icons.blender_rounded;
       case 'Completed':
         return Icons.check_circle_rounded;
+      case 'Cancelled':
+        return Icons.cancel_rounded;
       default:
         return Icons.info_outline;
+    }
+  }
+
+  // Khách hủy đơn khi quán chưa xác nhận. Trả về true nếu hủy thành công.
+  Future<bool> _confirmAndCancelOrder(OrderModel order) async {
+    if (_cancellingOrderIds.contains(order.id)) return false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hủy Đơn Hàng?', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+        content: Text(
+          'Bạn chắc chắn muốn hủy đơn #${order.orderCode} (${order.formattedTotalAmount})?\n\n'
+          'Đơn đã hủy không thể khôi phục. Nếu muốn, bạn có thể đặt lại đơn mới.',
+          style: const TextStyle(fontSize: 14, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Không hủy', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hủy đơn'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    setState(() => _cancellingOrderIds.add(order.id));
+    try {
+      await _dbService.cancelOrder(order.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đã hủy đơn #${order.orderCode}.'), backgroundColor: Colors.green.shade700),
+        );
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        // Rules từ chối khi đơn không còn ở trạng thái Pending (quán vừa xác nhận)
+        final message = e.toString().contains('permission-denied')
+            ? 'Không thể hủy: quán đã xác nhận đơn #${order.orderCode}. Vui lòng liên hệ quán nếu cần thay đổi.'
+            : 'Hủy đơn thất bại: $e';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _cancellingOrderIds.remove(order.id));
     }
   }
 
@@ -226,6 +287,27 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               ),
               const SizedBox(height: 16),
 
+              if (order.canCustomerCancel) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade700,
+                      side: BorderSide(color: Colors.red.shade300),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    icon: const Icon(Icons.cancel_outlined, size: 18),
+                    label: const Text('Hủy đơn này'),
+                    onPressed: () async {
+                      final cancelled = await _confirmAndCancelOrder(order);
+                      if (cancelled && ctx.mounted) Navigator.pop(ctx);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -280,6 +362,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                 _buildFilterChip('Đang chuẩn bị'),
                 const SizedBox(width: 8),
                 _buildFilterChip('Đã hoàn thành'),
+                const SizedBox(width: 8),
+                _buildFilterChip('Đã hủy'),
               ],
             ),
           ),
@@ -309,6 +393,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   if (_selectedFilter == 'Chờ xác nhận') return order.status == 'Pending';
                   if (_selectedFilter == 'Đang chuẩn bị') return order.status == 'Preparing';
                   if (_selectedFilter == 'Đã hoàn thành') return order.status == 'Completed';
+                  if (_selectedFilter == 'Đã hủy') return order.status == 'Cancelled';
                   return true;
                 }).toList();
 
@@ -486,15 +571,37 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   ),
                 ],
               ),
-              OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: primaryBrown,
-                  side: const BorderSide(color: primaryBrown),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: () => _showOrderDetailModal(context, order),
-                child: const Text('Xem chi tiết', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (order.canCustomerCancel) ...[
+                    _cancellingOrderIds.contains(order.id)
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red),
+                          )
+                        : TextButton(
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.red.shade700,
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                            ),
+                            onPressed: () => _confirmAndCancelOrder(order),
+                            child: const Text('Hủy đơn', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          ),
+                    const SizedBox(width: 4),
+                  ],
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: primaryBrown,
+                      side: const BorderSide(color: primaryBrown),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => _showOrderDetailModal(context, order),
+                    child: const Text('Xem chi tiết', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ),
             ],
           ),

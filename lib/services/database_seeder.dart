@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'auth_service.dart';
 
 /// Service tự động nạp dữ liệu mẫu (Seeder) & Đồng bộ dữ liệu chuẩn (PRM393)
 class DatabaseSeeder {
@@ -317,7 +318,7 @@ class DatabaseSeeder {
       {
         'uid': 'admin_tiemtranho_seller',
         'name': 'Chủ Quán (Admin)',
-        'email': 'admin.tiemtranho@gmail.com',
+        'email': AuthService.adminEmail,
         'role': 'seller',
         'createdAt': FieldValue.serverTimestamp(),
       },

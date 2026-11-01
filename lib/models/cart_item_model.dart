@@ -9,6 +9,11 @@ class CartItemModel {
   final String sugar;
   final String ice;
   final List<String> toppings;
+  // Giá gốc của món và giá từng topping (id → giá) lúc thêm vào giỏ,
+  // để khi đặt hàng so với dữ liệu mới nhất trên Firestore
+  final int basePrice;
+  final Map<String, int> toppingPrices;
+  // = basePrice + phụ thu size + giá topping
   final int unitPrice;
   int quantity;
 
@@ -21,6 +26,8 @@ class CartItemModel {
     required this.sugar,
     required this.ice,
     required this.toppings,
+    required this.basePrice,
+    this.toppingPrices = const {},
     required this.unitPrice,
     this.quantity = 1,
   });

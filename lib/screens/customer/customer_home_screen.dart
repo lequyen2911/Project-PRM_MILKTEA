@@ -6,7 +6,7 @@ import '../../models/product_model.dart';
 import '../../providers/cart_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
-import '../../services/database_seeder.dart';
+import '../../utils/text_utils.dart';
 import '../auth/login_screen.dart';
 import '../seller/seller_dashboard_screen.dart';
 import 'cart_screen.dart';
@@ -86,7 +86,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               builder: (context, snapshot) {
                 bool isSeller = false;
                 final email = user.email?.trim().toLowerCase() ?? '';
-                if (email == 'admin.tiemtranho@gmail.com') {
+                if (email == AuthService.adminEmail) {
                   isSeller = true;
                 } else if (snapshot.hasData && snapshot.data!.exists) {
                   final data = snapshot.data!.data() as Map<String, dynamic>?;
@@ -109,31 +109,6 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 );
               },
             ),
-          // Nút cập nhật link ảnh tự động lên Firestore
-          IconButton(
-            icon: const Icon(Icons.sync_rounded),
-            tooltip: 'Cập nhật lại link ảnh nét',
-            onPressed: () async {
-              try {
-                await DatabaseSeeder.fixAllImageLinks();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('✅ Đã cập nhật lại link ảnh nét đẹp trên Firestore!'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                  setState(() {});
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red),
-                  );
-                }
-              }
-            },
-          ),
           // Nút Lịch sử đơn hàng của tôi
           IconButton(
             icon: const Icon(Icons.receipt_long_rounded),
@@ -173,6 +148,8 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             icon: const Icon(Icons.logout),
             tooltip: 'Đăng xuất',
             onPressed: () async {
+              // Giỏ hàng nằm ở gốc app, phải xóa để tài khoản đăng nhập sau không thấy giỏ của người trước
+              context.read<CartProvider>().clear();
               await AuthService().signOut();
               if (context.mounted) {
                 Navigator.pushAndRemoveUntil(
@@ -234,15 +211,18 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
 
           final allProducts = snapshot.data ?? [];
 
-          // Gom danh mục động từ Firestore và bổ sung mục Topping
-          final Set<String> categorySet = {'Tất cả'};
+          // Gom danh mục động từ Firestore và bổ sung mục Topping.
+          // Không phân biệt hoa thường: "trà sữa" và "Trà sữa" chỉ hiện 1 nút (giữ cách viết gặp đầu tiên).
+          final categories = <String>['Tất cả'];
           for (var p in allProducts) {
-            if (p.category.trim().isNotEmpty) {
-              categorySet.add(p.category.trim());
+            final category = p.category.trim();
+            if (category.isNotEmpty &&
+                category.toLowerCase() != 'topping' && // "Topping" là tab riêng bên dưới
+                !categories.any((c) => c.toLowerCase() == category.toLowerCase())) {
+              categories.add(category);
             }
           }
-          categorySet.add('Topping');
-          final categories = categorySet.toList();
+          categories.add('Topping');
 
           // Lọc danh sách món
           var filteredList = allProducts;
@@ -254,8 +234,8 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
 
           if (_searchQuery.isNotEmpty) {
             filteredList = filteredList.where((p) {
-              return p.name.toLowerCase().contains(_searchQuery) ||
-                  (p.description ?? '').toLowerCase().contains(_searchQuery);
+              return normalizeForSearch(p.name).contains(_searchQuery) ||
+                  normalizeForSearch(p.description ?? '').contains(_searchQuery);
             }).toList();
           }
 
@@ -276,7 +256,8 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                     controller: _searchController,
                     onChanged: (val) {
                       setState(() {
-                        _searchQuery = val.trim().toLowerCase();
+                        // Bỏ dấu cả từ khóa lẫn tên món: gõ "tra sua" vẫn ra "Trà sữa"
+                        _searchQuery = normalizeForSearch(val);
                       });
                     },
                     decoration: InputDecoration(
@@ -412,26 +393,13 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                           const SizedBox(height: 12),
                           Text(
                             allProducts.isEmpty
-                                ? 'Chưa có món nào đang hiển thị trên Firestore!'
+                                ? 'Quán chưa có món nào, bạn quay lại sau nhé!'
                                 : 'Không tìm thấy món phù hợp với tìm kiếm.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
                               color: Colors.brown.shade700,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton.icon(
-                            onPressed: () async {
-                              await DatabaseSeeder.seedProducts(force: true);
-                              setState(() {});
-                            },
-                            icon: const Icon(Icons.add_circle_outline),
-                            label: const Text('Thêm thực đơn mẫu vào Firestore'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: accentColor,
-                              foregroundColor: Colors.white,
                             ),
                           ),
                         ],
@@ -584,16 +552,34 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: _dbService.getToppingsStream(),
       builder: (context, snapshot) {
-        List<Map<String, dynamic>> toppings = snapshot.data ?? [];
+        if (!snapshot.hasData) {
+          return const SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        // App khách chỉ đọc menu; dữ liệu mẫu do Seller đồng bộ ở Kênh Quản Trị
+        List<Map<String, dynamic>> toppings = snapshot.data!;
         if (toppings.isEmpty) {
-          toppings = DatabaseSeeder.defaultToppings;
-          DatabaseSeeder.seedToppings().catchError((_) {});
+          return const SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(24.0),
+                child: Text(
+                  'Quán chưa có topping nào, bạn quay lại sau nhé!',
+                  style: TextStyle(color: Colors.grey, fontSize: 14),
+                ),
+              ),
+            ),
+          );
         }
 
         if (_searchQuery.isNotEmpty) {
           toppings = toppings.where((t) {
-            final name = (t['name'] ?? t['ten'] ?? '').toString().toLowerCase();
-            final desc = (t['description'] ?? t['desc'] ?? '').toString().toLowerCase();
+            final name = normalizeForSearch((t['name'] ?? t['ten'] ?? '').toString());
+            final desc = normalizeForSearch((t['description'] ?? t['desc'] ?? '').toString());
             return name.contains(_searchQuery) || desc.contains(_searchQuery);
           }).toList();
         }

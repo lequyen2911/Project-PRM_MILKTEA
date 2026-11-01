@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'providers/cart_provider.dart';
 import 'screens/auth/splash_screen.dart';
-import 'services/database_seeder.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,9 +11,8 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Tự động kiểm tra và seed dữ liệu topping & sản phẩm nếu Firestore chưa có
-  DatabaseSeeder.seedToppings().catchError((e) => debugPrint('Seed toppings error: $e'));
-  DatabaseSeeder.seedProducts().catchError((e) => debugPrint('Seed products error: $e'));
+  // Không tự seed ở đây: app chạy trên máy khách, trước cả khi đăng nhập.
+  // Seller đồng bộ thực đơn mẫu bằng nút trong Kênh Quản Trị (syncStandardMenuData).
 
   runApp(const MyApp());
 }

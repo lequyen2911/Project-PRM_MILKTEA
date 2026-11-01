@@ -60,6 +60,8 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
         return Colors.blue.shade700;
       case 'Completed':
         return Colors.green.shade700;
+      case 'Cancelled':
+        return Colors.red.shade700;
       default:
         return Colors.grey.shade700;
     }
@@ -73,6 +75,8 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
         return Colors.blue.shade50;
       case 'Completed':
         return Colors.green.shade50;
+      case 'Cancelled':
+        return Colors.red.shade50;
       default:
         return Colors.grey.shade100;
     }
@@ -106,6 +110,8 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
                 _buildFilterChip('Preparing', label: 'Đang chuẩn bị'),
                 const SizedBox(width: 8),
                 _buildFilterChip('Completed', label: 'Đã hoàn thành'),
+                const SizedBox(width: 8),
+                _buildFilterChip('Cancelled', label: 'Đã hủy'),
               ],
             ),
           ),
@@ -476,6 +482,30 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
               'Đã hoàn thành',
               style: TextStyle(
                 color: Colors.green,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (order.status == 'Cancelled') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.red.shade200),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cancel, size: 16, color: Colors.red.shade700),
+            const SizedBox(width: 4),
+            Text(
+              'Khách đã hủy',
+              style: TextStyle(
+                color: Colors.red.shade700,
                 fontWeight: FontWeight.bold,
                 fontSize: 12,
               ),

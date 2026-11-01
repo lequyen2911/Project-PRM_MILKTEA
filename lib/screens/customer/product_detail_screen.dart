@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/product_model.dart';
@@ -29,16 +30,50 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   String _selectedIce = '100%';
   final List<String> _iceOptions = ['100%', '70%', '50%', '0%'];
 
-  final List<Map<String, dynamic>> _selectedToppings = [];
+  // Id các topping khách đã tick
+  final Set<String> _selectedToppingIds = {};
   int _quantity = 1;
 
-  // Tính tổng tiền động
-  int get _totalPrice {
+  // Topping mới nhất từ Firestore (id → dữ liệu). Nghe ở cấp màn hình để khi quán
+  // đổi giá / báo hết hàng thì cả danh sách lẫn tổng tiền ở nút "Thêm" cùng cập nhật.
+  Map<String, Map<String, dynamic>> _toppingsById = {};
+  bool _toppingsLoaded = false;
+  StreamSubscription<List<Map<String, dynamic>>>? _toppingsSub;
+
+  /// Topping đã tick và vẫn còn hàng, theo giá mới nhất
+  List<Map<String, dynamic>> get _activeToppings => _selectedToppingIds
+      .map((id) => _toppingsById[id])
+      .whereType<Map<String, dynamic>>()
+      .where(DatabaseService.isToppingAvailable)
+      .toList();
+
+  int get _unitPrice {
     int price = widget.product.basePrice + (_sizePrice[_selectedSize] ?? 0);
-    for (var topping in _selectedToppings) {
+    for (var topping in _activeToppings) {
       price += (topping['price'] as num).toInt();
     }
-    return price * _quantity;
+    return price;
+  }
+
+  // Tính tổng tiền động
+  int get _totalPrice => _unitPrice * _quantity;
+
+  @override
+  void initState() {
+    super.initState();
+    _toppingsSub = _dbService.getToppingsStream().listen((toppings) {
+      if (!mounted) return;
+      setState(() {
+        _toppingsById = {for (final t in toppings) t['id'].toString(): t};
+        _toppingsLoaded = true;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _toppingsSub?.cancel();
+    super.dispose();
   }
 
   String _formatPrice(int amount) {
@@ -277,13 +312,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: _dbService.getToppingsStream(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
+                  Builder(
+                    builder: (context) {
+                      if (!_toppingsLoaded) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      final toppings = snapshot.data!;
+                      final toppings = _toppingsById.values.toList();
                       if (toppings.isEmpty) {
                         return const Text(
                           'Chưa có topping nào.',
@@ -293,12 +327,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                       return Column(
                         children: toppings.map((topping) {
-                          final isChecked = _selectedToppings
-                              .any((t) => t['id'] == topping['id']);
+                          final toppingId = topping['id'].toString();
                           final price = (topping['price'] as num).toInt();
                           final img = topping['imageUrl'] ?? topping['image'] ?? '';
-                          final rawAvailable = topping['isAvailable'] ?? topping['available'];
-                          final bool isToppingAvailable = rawAvailable == null ? true : (rawAvailable == true);
+                          final isToppingAvailable = DatabaseService.isToppingAvailable(topping);
+                          // Topping vừa hết hàng thì bỏ tick (và không tính tiền), dù khách đã chọn trước đó
+                          final isChecked = isToppingAvailable && _selectedToppingIds.contains(toppingId);
 
                           return CheckboxListTile(
                             contentPadding: EdgeInsets.zero,
@@ -340,10 +374,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 ? (bool? val) {
                                     setState(() {
                                       if (val == true) {
-                                        _selectedToppings.add(topping);
+                                        _selectedToppingIds.add(toppingId);
                                       } else {
-                                        _selectedToppings.removeWhere(
-                                            (t) => t['id'] == topping['id']);
+                                        _selectedToppingIds.remove(toppingId);
                                       }
                                     });
                                   }
@@ -434,13 +467,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           );
                         }
                       : () {
-                          final toppingPrice = _selectedToppings.fold<int>(
-                            0,
-                            (sum, t) => sum + (t['price'] as num).toInt(),
-                          );
-                          final unitPrice = widget.product.basePrice +
-                              (_sizePrice[_selectedSize] ?? 0) +
-                              toppingPrice;
+                          final toppings = _activeToppings;
 
                           context.read<CartProvider>().addItem(
                                 productId: widget.product.id,
@@ -449,15 +476,23 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 size: _selectedSize,
                                 sugar: _selectedSugar,
                                 ice: _selectedIce,
-                                toppings: _selectedToppings
+                                toppings: toppings
                                     .map((t) => t['name'].toString())
                                     .toList(),
-                                unitPrice: unitPrice,
+                                basePrice: widget.product.basePrice,
+                                toppingPrices: {
+                                  for (final t in toppings) t['id'].toString(): (t['price'] as num).toInt(),
+                                },
+                                unitPrice: _unitPrice,
                                 quantity: _quantity,
                               );
 
-                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          final navigator = Navigator.of(context);
+                          final scaffoldMessenger =
+                              ScaffoldMessenger.of(context);
+
+                          scaffoldMessenger.hideCurrentSnackBar();
+                          scaffoldMessenger.showSnackBar(
                             SnackBar(
                               content: Text(
                                 'Đã thêm ${widget.product.name} (x$_quantity) vào giỏ hàng!',
@@ -471,8 +506,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 label: 'Xem giỏ',
                                 textColor: const Color(0xFFFFCC80),
                                 onPressed: () {
-                                  Navigator.push(
-                                    context,
+                                  navigator.push(
                                     MaterialPageRoute(
                                       builder: (_) => const CartScreen(),
                                     ),
@@ -482,7 +516,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             ),
                           );
 
-                          Navigator.pop(context);
+                          navigator.pop();
                         },
                   child: Text(
                     widget.product.isAvailable

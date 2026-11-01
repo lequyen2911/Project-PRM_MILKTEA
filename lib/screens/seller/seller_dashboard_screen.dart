@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
 import '../../models/order_model.dart';
+import '../../models/store_settings_model.dart';
+import '../../providers/cart_provider.dart';
+import '../../utils/shipping_policy.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 import '../../services/database_seeder.dart';
 import '../auth/login_screen.dart';
 import 'manage_menu_screen.dart';
 import 'seller_orders_screen.dart';
+import 'store_settings_screen.dart';
 
 class SellerDashboardScreen extends StatefulWidget {
   const SellerDashboardScreen({super.key});
@@ -20,7 +25,6 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
   bool _isSyncing = false;
 
   static const Color primaryBrown = Color(0xFF6D4C41);
-  static const Color accentOrange = Color(0xFFD87D4A);
 
   /// Kiểm tra xem thời gian có thuộc ngày hôm nay theo múi giờ Việt Nam (Asia/Ho_Chi_Minh: UTC+7) không
   bool _isTodayVietnam(DateTime? date) {
@@ -63,7 +67,9 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
             children: [
               Icon(Icons.sync_rounded, color: primaryBrown),
               SizedBox(width: 8),
-              Text('Đồng Bộ Thực Đơn', style: TextStyle(fontWeight: FontWeight.bold, color: primaryBrown)),
+              Flexible(
+                child: Text('Đồng Bộ Thực Đơn', style: TextStyle(fontWeight: FontWeight.bold, color: primaryBrown)),
+              ),
             ],
           ),
           content: const Text(
@@ -167,6 +173,8 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
             icon: const Icon(Icons.logout),
             tooltip: 'Đăng xuất',
             onPressed: () async {
+              // Seller cũng có thể đã thêm món vào giỏ từ trang khách
+              context.read<CartProvider>().clear();
               await AuthService().signOut();
               if (context.mounted) {
                 Navigator.pushAndRemoveUntil(
@@ -282,8 +290,8 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
                     pendingOrdersCount++;
                   }
 
-                  // 2. Doanh thu hôm nay từ đơn 'Completed'
-                  if (isToday) {
+                  // 2. Doanh thu hôm nay từ đơn 'Completed' (đơn khách đã hủy không tính vào tổng đơn)
+                  if (isToday && order.status != 'Cancelled') {
                     todayTotalOrdersCount++;
                     if (order.status == 'Completed') {
                       todayCompletedRevenue += order.totalAmount;
@@ -363,9 +371,11 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
                                   children: [
                                     Icon(Icons.hourglass_top, color: Colors.orange, size: 18),
                                     SizedBox(width: 6),
-                                    Text(
-                                      'Đơn chờ xác nhận',
-                                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                                    Flexible(
+                                      child: Text(
+                                        'Đơn chờ xác nhận',
+                                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -398,9 +408,11 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
                                   children: [
                                     Icon(Icons.shopping_bag_outlined, color: primaryBrown, size: 18),
                                     SizedBox(width: 6),
-                                    Text(
-                                      'Tổng đơn trong ngày',
-                                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                                    Flexible(
+                                      child: Text(
+                                        'Tổng đơn trong ngày',
+                                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -545,6 +557,70 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+
+            // Thẻ Vị trí quán & giao hàng (dùng để tính phí ship theo km)
+            InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const StoreSettingsScreen()),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: StreamBuilder<StoreSettings?>(
+                  stream: _dbService.getStoreSettingsStream(),
+                  builder: (context, snapshot) {
+                    final settings = snapshot.data;
+                    return Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade50,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.storefront_rounded, color: Colors.green.shade800, size: 26),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Vị Trí Quán & Giao Hàng',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                settings == null
+                                    ? 'Chưa cài vị trí: phí ship đang tính theo giá trị đơn'
+                                    : 'Giao trong ${ShippingPolicy.formatKm(settings.deliveryRadiusKm)}'
+                                        '${settings.address.isNotEmpty ? ' • ${settings.address}' : ''}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: settings == null ? Colors.orange.shade900 : Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: Colors.green.shade700),
+                      ],
+                    );
+                  },
+                ),
+              ),
             ),
           ],
         ),
