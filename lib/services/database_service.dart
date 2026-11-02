@@ -169,10 +169,23 @@ class DatabaseService {
     });
   }
 
-  /// Cập nhật trạng thái đơn hàng (Pending -> Preparing -> Completed)
+  /// Cập nhật trạng thái đơn hàng (Pending -> Preparing -> Completed).
+  /// Quy tắc được phép chuyển nằm ở OrderPolicy; firestore.rules kiểm tra lại bằng giờ server.
   Future<void> updateOrderStatus(String orderId, String newStatus) async {
     await _firestore.collection('orders').doc(orderId).update({
       'status': newStatus,
+      'updatedAt': FieldValue.serverTimestamp(),
+      // Mốc tính hạn "đang pha" (OrderPolicy.preparingTimeout)
+      if (newStatus == 'Preparing') 'acceptedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Seller hủy đơn kèm lý do (khách thấy lý do trong lịch sử đơn)
+  Future<void> sellerCancelOrder(String orderId, String reason) async {
+    await _firestore.collection('orders').doc(orderId).update({
+      'status': 'Cancelled',
+      'cancelledBy': 'seller',
+      'cancelReason': reason,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -196,6 +209,9 @@ class DatabaseService {
   /// Khách hủy đơn của mình. firestore.rules chỉ cho hủy khi đơn còn 'Pending',
   /// nên nếu quán vừa xác nhận đơn thì lệnh này bị từ chối (permission-denied).
   Future<void> cancelOrder(String orderId) async {
+    // Không ghi cancelledBy: đơn hủy không có trường này được hiểu là khách hủy
+    // (OrderModel.cancelledBySeller, firestore.rules mặc định 'customer'),
+    // nên lệnh hủy chạy được cả khi Firebase còn rules bản cũ.
     await _firestore.collection('orders').doc(orderId).update({
       'status': 'Cancelled',
       'updatedAt': FieldValue.serverTimestamp(),

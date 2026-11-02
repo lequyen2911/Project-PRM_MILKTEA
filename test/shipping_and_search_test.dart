@@ -7,20 +7,23 @@ import 'package:projectgroup_milktea/utils/text_utils.dart';
 
 void main() {
   group('ShippingPolicy.feeByDistance', () {
-    test('trong 3 km đầu: 15.000đ', () {
-      expect(ShippingPolicy.feeByDistance(distanceKm: 0.5, subtotal: 40000), 15000);
-      expect(ShippingPolicy.feeByDistance(distanceKm: 3.0, subtotal: 40000), 15000);
+    test('đơn dưới 50.000đ: 10.000đ trong 3 km, 15.000đ xa hơn', () {
+      expect(ShippingPolicy.feeByDistance(distanceKm: 2, subtotal: 45000), 10000);
+      expect(ShippingPolicy.feeByDistance(distanceKm: 3.0, subtotal: 45000), 10000);
+      expect(ShippingPolicy.feeByDistance(distanceKm: 3.1, subtotal: 45000), 15000);
+      expect(ShippingPolicy.feeByDistance(distanceKm: 12, subtotal: 49999), 15000);
     });
 
-    test('mỗi km tiếp theo (làm tròn lên) cộng 5.000đ', () {
-      expect(ShippingPolicy.feeByDistance(distanceKm: 3.2, subtotal: 40000), 20000);
-      expect(ShippingPolicy.feeByDistance(distanceKm: 5.0, subtotal: 40000), 25000);
-      expect(ShippingPolicy.feeByDistance(distanceKm: 7.0, subtotal: 40000), 35000);
+    test('đơn 50.000đ – dưới 150.000đ: freeship trong 3 km, 5.000đ xa hơn', () {
+      expect(ShippingPolicy.feeByDistance(distanceKm: 2, subtotal: 50000), 0);
+      expect(ShippingPolicy.feeByDistance(distanceKm: 2, subtotal: 80000), 0);
+      expect(ShippingPolicy.feeByDistance(distanceKm: 8, subtotal: 120000), 5000);
+      expect(ShippingPolicy.feeByDistance(distanceKm: 8, subtotal: 149999), 5000);
     });
 
-    test('đơn từ 100.000đ được miễn phí 3 km đầu', () {
-      expect(ShippingPolicy.feeByDistance(distanceKm: 2.5, subtotal: 100000), 0);
-      expect(ShippingPolicy.feeByDistance(distanceKm: 4.5, subtotal: 120000), 10000);
+    test('đơn từ 150.000đ: freeship mọi khoảng cách', () {
+      expect(ShippingPolicy.feeByDistance(distanceKm: 1, subtotal: 150000), 0);
+      expect(ShippingPolicy.feeByDistance(distanceKm: 12, subtotal: 160000), 0);
     });
 
     test('giỏ trống thì không tính phí', () {
@@ -47,6 +50,17 @@ void main() {
 
   test('formatKm dùng dấu phẩy thập phân', () {
     expect(ShippingPolicy.formatKm(2.345), '2,3 km');
+  });
+
+  group('joinAddress', () {
+    test('ghép chi tiết khách ghi với địa chỉ theo vị trí ghim', () {
+      expect(joinAddress(' Số 12,  hẻm 45 ', '123 Lê Lợi, Q.1'), 'Số 12, hẻm 45 – 123 Lê Lợi, Q.1');
+    });
+
+    test('không có chi tiết thì chỉ còn địa chỉ bản đồ', () {
+      expect(joinAddress('', '123 Lê Lợi, Q.1'), '123 Lê Lợi, Q.1');
+      expect(joinAddress(null, '123 Lê Lợi, Q.1'), '123 Lê Lợi, Q.1');
+    });
   });
 
   group('normalizeForSearch', () {

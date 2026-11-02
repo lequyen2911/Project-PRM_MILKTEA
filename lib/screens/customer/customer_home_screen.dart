@@ -301,17 +301,21 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                         size: 20,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        _selectedCategory == 'Topping'
-                            ? 'Danh Sách Topping & Thạch'
-                            : 'Thực Đơn Trà Sữa & Đồ Uống',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF333333),
+                      Expanded(
+                        child: Text(
+                          _selectedCategory == 'Topping'
+                              ? 'Danh Sách Topping & Thạch'
+                              : 'Thực Đơn Trà Sữa & Đồ Uống',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF333333),
+                          ),
                         ),
                       ),
-                      const Spacer(),
+                      const SizedBox(width: 8),
                       Text(
                         _selectedCategory == 'Topping'
                             ? 'Topping gọi thêm'

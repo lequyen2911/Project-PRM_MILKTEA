@@ -151,24 +151,29 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Chi tiết đơn #${order.orderCode}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: primaryBrown,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Chi tiết đơn #${order.orderCode}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: primaryBrown,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        order.formattedCreatedAt,
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                      ),
-                    ],
+                        const SizedBox(height: 2),
+                        Text(
+                          order.formattedCreatedAt,
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
@@ -186,6 +191,23 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   ),
                 ],
               ),
+              if (order.cancelledBySeller) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'Quán đã hủy đơn này'
+                    '${(order.cancelReason ?? '').isNotEmpty ? ': ${order.cancelReason}' : ''}. '
+                    'Xin lỗi bạn vì sự bất tiện.',
+                    style: TextStyle(fontSize: 13, color: Colors.red.shade800),
+                  ),
+                ),
+              ],
               const Divider(height: 24),
 
               // Danh sách món
@@ -258,6 +280,22 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   ),
                 ],
               ),
+              if (order.deliveryAddress.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.location_on_outlined, size: 20, color: primaryBrown),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Giao đến: ${order.deliveryAddress}',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
 
               // Tổng cộng

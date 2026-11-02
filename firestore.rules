@@ -50,19 +50,61 @@ service cloud.firestore {
 
     // Đơn hàng: khách tạo đơn của chính mình (trạng thái Pending) và chỉ xem đơn của mình.
     // Khách chỉ được hủy (Pending → Cancelled) khi quán chưa xác nhận.
-    // Seller xem tất cả đơn và đổi trạng thái, trừ đơn khách đã hủy.
+    // Seller đổi trạng thái theo lib/utils/order_policy.dart (giờ server, không tin giờ máy):
+    //   Pending   → Preparing  khi đơn đặt chưa quá 30 phút
+    //   Pending   → Cancelled  (kèm lý do)
+    //   Preparing → Completed
+    //   Preparing → Cancelled  khi đã nhận đơn quá 2 giờ (quá hạn)
+    // Đơn Completed / Cancelled khóa hẳn; không ai được xóa đơn.
     match /orders/{orderId} {
+      function changedKeys() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+
+      function movesTo(from, to) {
+        return resource.data.status == from && request.resource.data.status == to;
+      }
+
+      function pendingOverdue() {
+        return request.time > resource.data.createdAt + duration.value(30, 'm');
+      }
+
+      function preparingOverdue() {
+        return request.time > resource.data.get('acceptedAt', resource.data.createdAt) + duration.value(2, 'h');
+      }
+
+      function sellerCancelFields() {
+        return changedKeys().hasOnly(['status', 'updatedAt', 'cancelledBy', 'cancelReason'])
+          && request.resource.data.cancelledBy == 'seller'
+          && request.resource.data.cancelReason is string
+          && request.resource.data.cancelReason.size() <= 100;
+      }
+
+      function sellerCanUpdate() {
+        return isSeller() && (
+          (movesTo('Pending', 'Preparing') && !pendingOverdue()
+            && changedKeys().hasOnly(['status', 'updatedAt', 'acceptedAt'])
+            && request.resource.data.acceptedAt == request.time)
+          || (movesTo('Pending', 'Cancelled') && sellerCancelFields())
+          || (movesTo('Preparing', 'Completed') && changedKeys().hasOnly(['status', 'updatedAt']))
+          || (movesTo('Preparing', 'Cancelled') && preparingOverdue() && sellerCancelFields())
+        );
+      }
+
+      function customerCanCancel() {
+        return signedIn()
+          && resource.data.userId == request.auth.uid
+          && movesTo('Pending', 'Cancelled')
+          && changedKeys().hasOnly(['status', 'updatedAt', 'cancelledBy'])
+          && request.resource.data.get('cancelledBy', 'customer') == 'customer';
+      }
+
       allow create: if signedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'Pending';
       allow read: if signedIn() && (resource.data.userId == request.auth.uid || isSeller());
-      allow update: if (isSeller() && resource.data.status != 'Cancelled')
-        || (signedIn()
-            && resource.data.userId == request.auth.uid
-            && resource.data.status == 'Pending'
-            && request.resource.data.status == 'Cancelled'
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']));
-      allow delete: if isSeller();
+      allow update: if sellerCanUpdate() || customerCanCancel();
+      allow delete: if false;
     }
   }
 }

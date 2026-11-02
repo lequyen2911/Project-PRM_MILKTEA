@@ -19,3 +19,13 @@ String normalizeForSearch(String input) {
       .replaceAll(RegExp('[̀-ͯ]'), '')
       .replaceAll(RegExp(r'\s+'), ' ');
 }
+
+/// Ghép địa chỉ giao hàng cho Seller / shipper: phần chi tiết khách ghi + địa chỉ theo vị trí ghim.
+/// Vd: ("Số 12, hẻm 45", "123 Lê Lợi, Q.1") → "Số 12, hẻm 45 – 123 Lê Lợi, Q.1"
+String joinAddress(String? detail, String? mapAddress) {
+  final parts = [detail, mapAddress]
+      .map((s) => (s ?? '').trim().replaceAll(RegExp(r'\s+'), ' '))
+      .where((s) => s.isNotEmpty)
+      .toList();
+  return parts.join(' – ');
+}

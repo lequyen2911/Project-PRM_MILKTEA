@@ -9,7 +9,7 @@
 - Xem menu theo danh mục, tìm kiếm món và topping (gõ không dấu vẫn ra, vd "tra sua"). Menu tự cập nhật khi quán thay đổi (Firestore realtime).
 - Tùy chọn size (M / L), mức đường, mức đá, topping và số lượng.
 - Giỏ hàng tự gộp các ly giống nhau.
-- Ghim vị trí nhận hàng trên bản đồ (thấy vị trí quán và vùng giao), tìm địa chỉ theo tên đường / tòa nhà.
+- Ghim vị trí nhận hàng trên bản đồ (thấy vị trí quán và vùng giao), tìm địa chỉ theo tên đường / tòa nhà. Vị trí ghim quyết định địa chỉ và phí ship; ô "Chi tiết thêm" chỉ để ghi số nhà, hẻm, tầng cho shipper. App nhớ vị trí và chi tiết cho lần đặt sau.
 - Phí ship theo khoảng cách tới quán; vị trí ngoài vùng giao thì không đặt được.
 - Khi đặt hàng, app kiểm tra lại món / topping còn bán và giá mới nhất của quán.
 - Xem lịch sử và trạng thái đơn; hủy đơn khi quán chưa xác nhận.
@@ -17,7 +17,10 @@
 **Chủ quán (Seller)**
 - Bảng điều khiển: số đơn chờ xác nhận, tổng đơn trong ngày.
 - Quản lý món và topping: thêm, sửa, xóa, ẩn / hiện, đánh dấu hết hàng; ảnh chọn từ điện thoại hoặc dán link.
-- Quản lý đơn: chuyển trạng thái Pending → Preparing → Completed; xem đơn khách đã hủy (Cancelled).
+- Quản lý đơn (tab **Hôm nay** / **Lịch sử**): chuyển trạng thái Pending → Preparing → Completed, hủy đơn kèm lý do. Quy tắc ở `lib/utils/order_policy.dart` (có unit test), `firestore.rules` kiểm tra lại bằng giờ server:
+  - Tab Hôm nay: đơn đặt hôm nay (giờ Việt Nam) và mọi đơn chưa xong của các ngày trước. Tab Lịch sử: đơn đã xong của các ngày trước, chỉ xem, lọc theo ngày.
+  - Chờ xác nhận quá 30 phút hoặc đang pha quá 2 giờ (tính từ lúc quán nhận đơn) là **quá hạn**: đơn chờ xác nhận chỉ còn được hủy, đơn đang pha được hoàn thành hoặc hủy để đóng đơn.
+  - Đơn Đã hoàn thành / Đã hủy khóa hẳn; không ai xóa được đơn.
 - Vị trí quán & giao hàng: nhập tọa độ (dán từ Google Maps hoặc chọn trên bản đồ) và bán kính giao.
 - Đồng bộ thực đơn mẫu (chỉ bổ sung món còn thiếu, không ghi đè dữ liệu đã có).
 
@@ -25,12 +28,12 @@
 
 Quy tắc nằm ở `lib/utils/shipping_policy.dart` (có unit test).
 
-| Trường hợp | Phí |
-|---|---|
-| 3 km đầu | 15.000đ |
-| Mỗi km tiếp theo (làm tròn lên) | +5.000đ (tối đa 35.000đ ở 7 km) |
-| Đơn từ 100.000đ | Miễn phí 3 km đầu |
-| Ngoài bán kính giao (mặc định 7 km, Seller chỉnh được) | Không nhận đơn |
+| Giá trị đơn | Gần (≤ 3 km) | Xa (> 3 km) |
+|---|---|---|
+| Dưới 50.000đ | 10.000đ | 15.000đ |
+| 50.000đ – dưới 150.000đ | Freeship | 5.000đ |
+| Từ 150.000đ | Freeship | Freeship |
+| Ngoài bán kính giao (mặc định 7 km, Seller chỉnh được) | Không nhận đơn | Không nhận đơn |
 
 Khoảng cách đo theo đường chim bay từ quán tới vị trí khách ghim. Khi Seller chưa cài vị trí quán, phí tính theo giá trị đơn: dưới 50.000đ là 15.000đ, 50.000–100.000đ là 10.000đ, trên 100.000đ miễn phí.
 
@@ -59,8 +62,8 @@ lib/
     auth/      Splash (điều hướng theo role), đăng nhập / đăng ký
     customer/  Trang chủ, chi tiết món, giỏ hàng, chọn vị trí trên bản đồ, lịch sử đơn
     seller/    Bảng điều khiển, quản lý menu, quản lý đơn, vị trí quán & giao hàng
-  utils/       Quy tắc phí ship (shipping_policy), bỏ dấu tiếng Việt khi tìm kiếm (text_utils)
-test/          Unit test cho giỏ hàng, phí ship, tìm kiếm không dấu
+  utils/       Quy tắc phí ship (shipping_policy), xử lý đơn / quá hạn (order_policy), bỏ dấu tiếng Việt khi tìm kiếm (text_utils)
+test/          Unit test cho giỏ hàng, phí ship, quy tắc xử lý đơn, tìm kiếm không dấu
 firestore.rules  Quy tắc bảo mật Firestore (dán vào Firebase Console)
 ```
 
@@ -98,8 +101,8 @@ Với Firestore mới chưa có dữ liệu: đăng nhập Seller và bấm bi�
 |---|---|---|
 | `products` | Món: tên, giá gốc, danh mục, ảnh, mô tả, `isActive`, `isAvailable` | Seller |
 | `toppings` | Topping: tên, giá, ảnh | Seller |
-| `orders` | Đơn hàng: `userId`, thông tin nhận hàng, tọa độ, `distanceKm`, danh sách ly, tiền, `status` | Khách tạo đơn và hủy đơn `Pending` của mình; Seller đổi trạng thái |
-| `users` | Hồ sơ: email, tên, SĐT, địa chỉ, `role` | Chính chủ (trừ `role`); Seller |
+| `orders` | Đơn hàng: `userId`, thông tin nhận hàng (`deliveryAddress` = chi tiết + địa chỉ theo vị trí ghim, `addressDetail`, `mapAddress`), tọa độ, `distanceKm`, danh sách ly, tiền, `status`, `acceptedAt` (lúc quán nhận đơn), `cancelledBy` / `cancelReason` | Khách tạo đơn và hủy đơn `Pending` của mình; Seller đổi trạng thái theo quy tắc quá hạn; không ai xóa |
+| `users` | Hồ sơ: email, tên, SĐT, địa chỉ, vị trí ghim lần trước (`latitude`, `longitude`, `mapAddress`, `addressDetail`), `role` | Chính chủ (trừ `role`); Seller |
 | `settings/store` | Vị trí quán: `latitude`, `longitude`, `address`, `deliveryRadiusKm` | Seller |
 
 Khi sửa `firestore.rules`, dán lại nội dung vào Firebase Console → Firestore Database → **Rules** → **Publish**.

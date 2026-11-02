@@ -104,6 +104,11 @@ class OrderModel {
   final int totalAmount;
   final String status; // 'Pending', 'Preparing', 'Completed', 'Cancelled' (khách hủy khi còn Pending)
   final DateTime? createdAt;
+  final DateTime? acceptedAt; // lúc quán xác nhận đơn (Pending → Preparing)
+  final String? cancelledBy; // 'seller' khi quán hủy; không có = khách hủy
+  final String? cancelReason; // lý do Seller chọn khi hủy
+  final String deliveryAddress; // chi tiết khách ghi + địa chỉ theo vị trí ghim
+  final String note;
 
   OrderModel({
     required this.id,
@@ -116,6 +121,11 @@ class OrderModel {
     required this.totalAmount,
     required this.status,
     this.createdAt,
+    this.acceptedAt,
+    this.cancelledBy,
+    this.cancelReason,
+    this.deliveryAddress = '',
+    this.note = '',
   });
 
   Map<String, dynamic> toMap() {
@@ -181,6 +191,11 @@ class OrderModel {
       totalAmount: total,
       status: status.toString(),
       createdAt: created,
+      acceptedAt: map['acceptedAt'] is Timestamp ? (map['acceptedAt'] as Timestamp).toDate() : null,
+      cancelledBy: map['cancelledBy']?.toString(),
+      cancelReason: map['cancelReason']?.toString(),
+      deliveryAddress: (map['deliveryAddress'] ?? map['address'] ?? '').toString(),
+      note: (map['note'] ?? '').toString(),
     );
   }
 
@@ -232,4 +247,6 @@ class OrderModel {
 
   /// Khách chỉ được hủy khi quán chưa xác nhận (firestore.rules cũng chặn như vậy)
   bool get canCustomerCancel => status == 'Pending';
+
+  bool get cancelledBySeller => status == 'Cancelled' && cancelledBy == 'seller';
 }

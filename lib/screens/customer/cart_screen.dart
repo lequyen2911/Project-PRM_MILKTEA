@@ -9,6 +9,7 @@ import '../../models/store_settings_model.dart';
 import '../../providers/cart_provider.dart';
 import '../../services/database_service.dart';
 import '../../utils/shipping_policy.dart';
+import '../../utils/text_utils.dart';
 import 'map_picker_screen.dart';
 import 'order_history_screen.dart';
 
@@ -25,10 +26,11 @@ class _CartScreenState extends State<CartScreen> {
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _addressDetailController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
 
-  // Vị trí tọa độ bắt buộc từ bản đồ
+  // Vị trí giao hàng lấy từ bản đồ (bắt buộc): quyết định địa chỉ, khoảng cách và phí ship.
+  // _addressDetailController chỉ là phần ghi thêm cho shipper (số nhà, hẻm, tầng...).
   double? _selectedLat;
   double? _selectedLng;
   String? _mapAddressText;
@@ -61,7 +63,7 @@ class _CartScreenState extends State<CartScreen> {
     _storeSettingsSub?.cancel();
     _nameController.dispose();
     _phoneController.dispose();
-    _addressController.dispose();
+    _addressDetailController.dispose();
     _noteController.dispose();
     super.dispose();
   }
@@ -84,8 +86,22 @@ class _CartScreenState extends State<CartScreen> {
             if (data['phone'] != null) {
               _phoneController.text = data['phone'];
             }
-            if (data['address'] != null) {
-              _addressController.text = data['address'];
+            // Vị trí đã ghim ở lần đặt trước
+            final lat = data['latitude'];
+            final lng = data['longitude'];
+            final mapAddress = data['mapAddress']?.toString() ?? '';
+            if (lat is num && lng is num && mapAddress.isNotEmpty) {
+              setState(() {
+                _selectedLat = lat.toDouble();
+                _selectedLng = lng.toDouble();
+                _mapAddressText = mapAddress;
+              });
+            }
+            if (data['addressDetail'] != null) {
+              _addressDetailController.text = data['addressDetail'].toString();
+            } else if (_selectedLat == null && data['address'] != null) {
+              // Hồ sơ cũ chỉ có địa chỉ dạng chữ: giữ làm phần chi tiết, khách ghim lại một lần
+              _addressDetailController.text = data['address'].toString();
             }
           }
         }
@@ -105,11 +121,11 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   // Phí vận chuyển (quy tắc chi tiết ở ShippingPolicy):
-  // - Quán đã cài vị trí: theo km từ quán tới vị trí khách ghim
+  // - Quán đã cài vị trí: theo giá trị đơn và khoảng cách (gần / xa 3 km) tới vị trí khách ghim
   // - Quán chưa cài vị trí: theo giá trị đơn như trước
   int _calculateShippingFee(int subtotal) {
     if (_storeSettings == null) return ShippingPolicy.feeByOrderValue(subtotal);
-    // Chưa ghim vị trí: tạm tính mức thấp nhất (3 km đầu), ghim xong mới tính đúng theo km
+    // Chưa ghim vị trí: tạm tính theo mức giao gần (≤ 3 km), ghim xong mới tính đúng
     return ShippingPolicy.feeByDistance(distanceKm: _distanceKm ?? 0, subtotal: subtotal);
   }
 
@@ -122,7 +138,7 @@ class _CartScreenState extends State<CartScreen> {
     }
     final km = _distanceKm;
     if (km == null) {
-      return (text: 'Tạm tính, ghim vị trí để tính theo km', color: Colors.orange.shade800, background: Colors.orange.shade50);
+      return (text: 'Tạm tính, ghim vị trí để tính đúng', color: Colors.orange.shade800, background: Colors.orange.shade50);
     }
     if (shippingFee == 0) {
       return (text: 'Freeship • ${ShippingPolicy.formatKm(km)}', color: Colors.green.shade700, background: Colors.green.shade50);
@@ -271,7 +287,9 @@ class _CartScreenState extends State<CartScreen> {
         'customerName': _nameController.text.trim(),
         'customerEmail': user?.email ?? '',
         'customerPhone': _phoneController.text.trim(),
-        'deliveryAddress': _addressController.text.trim(),
+        // Địa chỉ đầy đủ cho Seller / shipper: chi tiết khách ghi + địa chỉ theo vị trí ghim
+        'deliveryAddress': joinAddress(_addressDetailController.text, _mapAddressText),
+        'addressDetail': _addressDetailController.text.trim(),
         'latitude': _selectedLat,
         'longitude': _selectedLng,
         'mapAddress': _mapAddressText,
@@ -289,12 +307,16 @@ class _CartScreenState extends State<CartScreen> {
 
       await _dbService.createOrder(orderData);
 
-      // Lưu lại sđt & địa chỉ vào hồ sơ người dùng để lần sau tiện đặt lại
+      // Lưu lại sđt, vị trí ghim và chi tiết địa chỉ vào hồ sơ để lần sau đặt ngay
       if (user != null) {
         try {
           await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
             'phone': _phoneController.text.trim(),
-            'address': _addressController.text.trim(),
+            'address': orderData['deliveryAddress'],
+            'addressDetail': _addressDetailController.text.trim(),
+            'latitude': _selectedLat,
+            'longitude': _selectedLng,
+            'mapAddress': _mapAddressText,
             'name': _nameController.text.trim(),
           }, SetOptions(merge: true));
         } catch (_) {}
@@ -880,21 +902,17 @@ class _CartScreenState extends State<CartScreen> {
 
           const SizedBox(height: 14),
           TextFormField(
-            controller: _addressController,
+            controller: _addressDetailController,
             maxLines: 2,
+            maxLength: 150,
             decoration: const InputDecoration(
-              labelText: 'Địa chỉ giao hàng chi tiết *',
+              labelText: 'Chi tiết thêm (không bắt buộc)',
               isDense: true,
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.home_outlined, size: 20),
-              hintText: 'Số nhà, ngõ, tên đường, phường/xã (tự điền khi ghim map)...',
+              hintText: 'Số nhà, hẻm, tầng, cổng... giúp shipper tìm đúng cửa',
+              helperText: 'Muốn đổi địa chỉ thì ghim lại vị trí trên bản đồ',
             ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Vui lòng ghim bản đồ hoặc nhập địa chỉ';
-              }
-              return null;
-            },
           ),
           const SizedBox(height: 12),
           TextFormField(
@@ -932,47 +950,11 @@ class _CartScreenState extends State<CartScreen> {
 
         if (result == null || !mounted) return;
 
-        // Chỉ tự điền khi ô địa chỉ trống hoặc vẫn là địa chỉ lấy từ lần ghim trước.
-        // Nếu khách đã tự gõ (số nhà, hẻm...) thì hỏi trước, tránh mất phần đã nhập.
-        final typedAddress = _addressController.text.trim();
-        bool replaceAddress = typedAddress.isEmpty || typedAddress == _mapAddressText;
-        if (!replaceAddress) {
-          replaceAddress = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  title: const Text('Thay địa chỉ đã nhập?', style: TextStyle(fontSize: 16)),
-                  content: Text(
-                    'Địa chỉ theo vị trí vừa ghim:\n${result.address}\n\nBạn muốn thay địa chỉ đang nhập bằng địa chỉ này không?',
-                    style: const TextStyle(fontSize: 14, height: 1.4),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Giữ địa chỉ của tôi'),
-                    ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryBrown,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Thay'),
-                    ),
-                  ],
-                ),
-              ) ??
-              false;
-        }
-        if (!mounted) return;
-
+        // Ghim lại chỉ đổi vị trí; phần chi tiết khách đã gõ giữ nguyên
         setState(() {
           _selectedLat = result.latitude;
           _selectedLng = result.longitude;
           _mapAddressText = result.address;
-          if (replaceAddress) {
-            _addressController.text = result.address;
-          }
         });
       },
       borderRadius: BorderRadius.circular(12),
@@ -1010,7 +992,7 @@ class _CartScreenState extends State<CartScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          hasLocation ? 'Vị trí đã ghim trên map' : 'Ghim vị trí nhận hàng *',
+                          hasLocation ? 'Vị trí giao hàng (chạm để đổi)' : 'Ghim vị trí nhận hàng *',
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.bold,
@@ -1042,9 +1024,7 @@ class _CartScreenState extends State<CartScreen> {
                     hasLocation
                         ? ((_mapAddressText != null && _mapAddressText!.isNotEmpty)
                             ? _mapAddressText!
-                            : (_addressController.text.isNotEmpty
-                                ? _addressController.text
-                                : 'Đã xác nhận vị trí (Chạm để đổi)'))
+                            : 'Đã xác nhận vị trí')
                         : 'Chạm vào đây để mở bản đồ và ghim vị trí nhận hàng',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

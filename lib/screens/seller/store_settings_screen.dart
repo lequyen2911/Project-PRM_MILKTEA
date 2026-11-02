@@ -235,8 +235,6 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
 
   // Giải thích cách tính phí ship cho Seller (theo ShippingPolicy)
   Widget _buildFeeRulesCard() {
-    String vnd(int amount) => '${(amount ~/ 1000)}.000đ';
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -256,11 +254,7 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '• ${_formatNumber(ShippingPolicy.baseDistanceKm)} km đầu: ${vnd(ShippingPolicy.baseFee)}\n'
-            '• Mỗi km tiếp theo (làm tròn lên): +${vnd(ShippingPolicy.feePerExtraKm)}\n'
-            '• Đơn từ ${vnd(ShippingPolicy.freeBaseThreshold)}: miễn phí ${_formatNumber(ShippingPolicy.baseDistanceKm)} km đầu\n'
-            '• Ngoài bán kính giao hàng: khách không đặt được\n'
-            '• Khoảng cách đo theo đường chim bay từ quán tới vị trí khách ghim',
+            ShippingPolicy.rulesDescription.map((line) => '• $line').join('\n'),
             style: const TextStyle(fontSize: 12.5, height: 1.5),
           ),
         ],
