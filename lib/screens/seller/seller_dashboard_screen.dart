@@ -23,6 +23,7 @@ class SellerDashboardScreen extends StatefulWidget {
 class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
   final DatabaseService _dbService = DatabaseService();
   bool _isSyncing = false;
+  DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
 
   static const Color primaryBrown = Color(0xFF6D4C41);
 
@@ -34,6 +35,100 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
     return vnDate.year == vnNow.year &&
         vnDate.month == vnNow.month &&
         vnDate.day == vnNow.day;
+  }
+
+  bool _isCurrentMonth(DateTime date) {
+    final vnNow = DateTime.now().toUtc().add(const Duration(hours: 7));
+    return date.year == vnNow.year && date.month == vnNow.month;
+  }
+
+  /// Cho phép Admin chọn tháng/năm bất kỳ
+  Future<void> _selectMonthYear(BuildContext context) async {
+    final now = DateTime.now().toUtc().add(const Duration(hours: 7));
+    int tempYear = _selectedMonth.year;
+    int tempMonth = _selectedMonth.month;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Row(
+                children: [
+                  Icon(Icons.calendar_month_rounded, color: primaryBrown),
+                  SizedBox(width: 8),
+                  Text('Chọn Tháng & Năm', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      DropdownButton<int>(
+                        value: tempMonth,
+                        items: List.generate(12, (index) => index + 1).map((m) {
+                          return DropdownMenuItem(
+                            value: m,
+                            child: Text('Tháng $m', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) setModalState(() => tempMonth = val);
+                        },
+                      ),
+                      const SizedBox(width: 16),
+                      DropdownButton<int>(
+                        value: tempYear,
+                        items: List.generate(3, (index) => now.year - 2 + index).map((y) {
+                          return DropdownMenuItem(
+                            value: y,
+                            child: Text('Năm $y', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) setModalState(() => tempYear = val);
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Hủy', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryBrown,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    // Không cho chọn tháng tương lai
+                    if (tempYear > now.year || (tempYear == now.year && tempMonth > now.month)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Không thể chọn tháng trong tương lai')),
+                      );
+                      return;
+                    }
+                    setState(() {
+                      _selectedMonth = DateTime(tempYear, tempMonth);
+                    });
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Áp dụng'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   /// Định dạng tiền VND (vd: 150.000 đ)
@@ -236,18 +331,105 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
 
             const SizedBox(height: 20),
 
-            // 2. KHU VỰC THỐNG KÊ NHANH DOANH THU & ĐƠN HÀNG (TASK 3)
-            const Row(
+            // 2. KHU VỰC THỐNG KÊ THEO THÁNG (TASK 1) & THỐNG KÊ HÔM NAY
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(Icons.analytics_rounded, color: primaryBrown, size: 22),
-                SizedBox(width: 8),
-                Text(
-                  'Thống Kê Nhanh Hôm Nay',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                const Row(
+                  children: [
+                    Icon(Icons.analytics_rounded, color: primaryBrown, size: 22),
+                    SizedBox(width: 8),
+                    Text(
+                      'Thống Kê Theo Tháng',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                InkWell(
+                  onTap: () => _selectMonthYear(context),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.brown.shade50,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.brown.shade200),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.calendar_month_rounded, size: 16, color: primaryBrown),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Tháng ${_selectedMonth.month}/${_selectedMonth.year}',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: primaryBrown,
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down_rounded, size: 18, color: primaryBrown),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
+
+            // Selector điều hướng Tháng trước / Tháng sau
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: primaryBrown,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                    label: const Text('Tháng trước', style: TextStyle(fontSize: 12)),
+                    onPressed: () {
+                      setState(() {
+                        _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
+                      });
+                    },
+                  ),
+                  Text(
+                    'Tháng ${_selectedMonth.month} / ${_selectedMonth.year}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: primaryBrown),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: _isCurrentMonth(_selectedMonth) ? Colors.grey : primaryBrown,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                    label: const Text('Tháng sau', style: TextStyle(fontSize: 12)),
+                    onPressed: _isCurrentMonth(_selectedMonth)
+                        ? null
+                        : () {
+                            setState(() {
+                              _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1);
+                            });
+                          },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
 
             StreamBuilder<List<OrderModel>>(
               stream: _dbService.getOrdersStream(),
@@ -277,23 +459,72 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
 
                 final orders = snapshot.data ?? [];
 
-                // Tính toán thống kê theo thời gian thực (Realtime Stream)
+                // 1. Map lưu ngày đặt hàng đầu tiên của từng khách hàng để tính đơn từ khách mới
+                final Map<String, DateTime> customerFirstOrderDate = {};
+                for (var order in orders) {
+                  if (order.createdAt != null) {
+                    final customerKey = order.userId.isNotEmpty
+                        ? order.userId
+                        : (order.customerEmail.isNotEmpty ? order.customerEmail : order.id);
+                    if (!customerFirstOrderDate.containsKey(customerKey) ||
+                        order.createdAt!.isBefore(customerFirstOrderDate[customerKey]!)) {
+                      customerFirstOrderDate[customerKey] = order.createdAt!;
+                    }
+                  }
+                }
+
+                // 2. Lọc danh sách đơn theo Tháng/Năm được chọn (múi giờ UTC+7 Việt Nam)
+                final selectedMonthOrders = orders.where((order) {
+                  if (order.createdAt == null) return false;
+                  final vnDate = order.createdAt!.toUtc().add(const Duration(hours: 7));
+                  return vnDate.year == _selectedMonth.year && vnDate.month == _selectedMonth.month;
+                }).toList();
+
+                // 3. Tính toán các chỉ số của tháng được chọn
+                int monthlyTotalOrders = selectedMonthOrders.length;
+                int monthlyCompletedOrders = 0;
+                int monthlyPendingOrders = 0;
+                int monthlyCancelledOrders = 0;
+                int monthlyCompletedRevenue = 0; // Chỉ tính đơn Completed!
+                int newCustomerOrdersCount = 0;
+
+                for (var order in selectedMonthOrders) {
+                  final status = order.status.trim();
+                  if (status == 'Completed') {
+                    monthlyCompletedOrders++;
+                    monthlyCompletedRevenue += order.totalAmount;
+                  } else if (status == 'Pending') {
+                    monthlyPendingOrders++;
+                  } else if (status == 'Cancelled') {
+                    monthlyCancelledOrders++;
+                  }
+
+                  // Kiểm tra xem đơn này có phải từ khách hàng mới (có đơn đầu tiên trong tháng này) không
+                  final customerKey = order.userId.isNotEmpty
+                      ? order.userId
+                      : (order.customerEmail.isNotEmpty ? order.customerEmail : order.id);
+                  final firstOrder = customerFirstOrderDate[customerKey];
+                  if (firstOrder != null) {
+                    final vnFirst = firstOrder.toUtc().add(const Duration(hours: 7));
+                    if (vnFirst.year == _selectedMonth.year && vnFirst.month == _selectedMonth.month) {
+                      newCustomerOrdersCount++;
+                    }
+                  }
+                }
+
+                // Tính riêng chỉ số hôm nay để giữ nguyên widget Thống kê nhanh Hôm nay
                 int todayCompletedRevenue = 0;
                 int pendingOrdersCount = 0;
                 int todayTotalOrdersCount = 0;
 
                 for (var order in orders) {
                   final isToday = _isTodayVietnam(order.createdAt);
-
-                  // 1. Số lượng đơn 'Pending' (Đơn đang chờ)
-                  if (order.status == 'Pending') {
+                  if (order.status.trim() == 'Pending') {
                     pendingOrdersCount++;
                   }
-
-                  // 2. Doanh thu hôm nay từ đơn 'Completed' (đơn khách đã hủy không tính vào tổng đơn)
-                  if (isToday && order.status != 'Cancelled') {
+                  if (isToday && order.status.trim() != 'Cancelled') {
                     todayTotalOrdersCount++;
-                    if (order.status == 'Completed') {
+                    if (order.status.trim() == 'Completed') {
                       todayCompletedRevenue += order.totalAmount;
                     }
                   }
@@ -301,7 +532,7 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
 
                 return Column(
                   children: [
-                    // Thẻ Doanh thu hôm nay (Nổi bật chính)
+                    // Thẻ Doanh thu Tháng (Nổi bật chính)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(18),
@@ -323,19 +554,35 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Icon(Icons.monetization_on, color: Colors.white, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                'Doanh thu hôm nay (Đã hoàn thành)',
-                                style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                              const Row(
+                                children: [
+                                  Icon(Icons.monetization_on, color: Colors.white, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Doanh thu tháng (Đã hoàn thành)',
+                                    style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  'T${_selectedMonth.month}/${_selectedMonth.year}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            _formatVnd(todayCompletedRevenue),
+                            _formatVnd(monthlyCompletedRevenue),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 26,
@@ -344,7 +591,7 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Tự động tính từ các đơn Completed ngày ${_getTodayDateStr()}',
+                            'Tính từ $monthlyCompletedOrders đơn Completed trong Tháng ${_selectedMonth.month}/${_selectedMonth.year}',
                             style: const TextStyle(color: Colors.white60, fontSize: 11),
                           ),
                         ],
@@ -353,83 +600,119 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
 
                     const SizedBox(height: 12),
 
-                    // 2 Thẻ chỉ số phụ (Đơn chờ xác nhận & Tổng đơn hôm nay)
-                    Row(
+                    // Lưới 5 thẻ chỉ số của Tháng được chọn
+                    Column(
                       children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.orange.shade200),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildStatCard(
+                                icon: Icons.receipt_long,
+                                color: primaryBrown,
+                                title: 'Tổng đơn tháng',
+                                value: '$monthlyTotalOrders đơn',
+                              ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Row(
-                                  children: [
-                                    Icon(Icons.hourglass_top, color: Colors.orange, size: 18),
-                                    SizedBox(width: 6),
-                                    Flexible(
-                                      child: Text(
-                                        'Đơn chờ xác nhận',
-                                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  '$pendingOrdersCount đơn',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: pendingOrdersCount > 0 ? Colors.orange.shade900 : Colors.black87,
-                                  ),
-                                ),
-                              ],
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _buildStatCard(
+                                icon: Icons.check_circle_rounded,
+                                color: Colors.green.shade700,
+                                title: 'Đã hoàn thành',
+                                value: '$monthlyCompletedOrders đơn',
+                              ),
                             ),
-                          ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.brown.shade100),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildStatCard(
+                                icon: Icons.hourglass_top_rounded,
+                                color: Colors.orange.shade800,
+                                title: 'Chờ xác nhận',
+                                value: '$monthlyPendingOrders đơn',
+                              ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Row(
-                                  children: [
-                                    Icon(Icons.shopping_bag_outlined, color: primaryBrown, size: 18),
-                                    SizedBox(width: 6),
-                                    Flexible(
-                                      child: Text(
-                                        'Tổng đơn trong ngày',
-                                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  '$todayTotalOrdersCount đơn',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: primaryBrown,
-                                  ),
-                                ),
-                              ],
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _buildStatCard(
+                                icon: Icons.cancel_rounded,
+                                color: Colors.red.shade700,
+                                title: 'Đã hủy',
+                                value: '$monthlyCancelledOrders đơn',
+                              ),
                             ),
-                          ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        _buildStatCard(
+                          icon: Icons.person_add_alt_1_rounded,
+                          color: Colors.blue.shade800,
+                          title: 'Đơn từ khách hàng mới',
+                          value: '$newCustomerOrdersCount đơn trong tháng ${_selectedMonth.month}/${_selectedMonth.year}',
+                          isFullWidth: true,
                         ),
                       ],
+                    ),
+
+                    if (selectedMonthOrders.isEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.info_outline, color: Colors.grey.shade600, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Chưa có đơn hàng nào trong Tháng ${_selectedMonth.month}/${_selectedMonth.year}.',
+                                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+
+                    // Thẻ phụ: Thống kê nhanh Hôm nay
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.brown.shade100),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.today_rounded, color: Colors.orange.shade800, size: 22),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Hôm Nay',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                                Text(
+                                  'Doanh thu: ${_formatVnd(todayCompletedRevenue)} • Đang chờ: $pendingOrdersCount • Tổng đơn: $todayTotalOrdersCount',
+                                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 );
@@ -628,8 +911,65 @@ class _SellerDashboardScreenState extends State<SellerDashboardScreen> {
     );
   }
 
-  String _getTodayDateStr() {
-    final vnNow = DateTime.now().toUtc().add(const Duration(hours: 7));
-    return '${vnNow.day.toString().padLeft(2, '0')}/${vnNow.month.toString().padLeft(2, '0')}/${vnNow.year}';
+  Widget _buildStatCard({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String value,
+    bool isFullWidth = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

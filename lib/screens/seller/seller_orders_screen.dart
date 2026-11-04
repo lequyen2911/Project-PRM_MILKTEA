@@ -210,7 +210,8 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
 
             final allOrders = snapshot.data ?? [];
             final todayOrders = allOrders.where((o) => OrderPolicy.belongsToToday(o, _now)).toList();
-            final historyOrders = allOrders.where((o) => !OrderPolicy.belongsToToday(o, _now)).toList();
+            // Lịch sử hiển thị tất cả các đơn hàng bao gồm các đơn đã hoàn thành và đã hủy của hôm nay và các ngày trước
+            final historyOrders = allOrders;
 
             return TabBarView(
               children: [
@@ -338,12 +339,12 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
     );
   }
 
-  // ---------------- Tab "Lịch sử": đơn đã xong của các ngày trước, chỉ xem ----------------
+  // ---------------- Tab "Lịch sử": tất cả đơn hàng, hỗ trợ lọc theo trạng thái và ngày ----------------
 
   Widget _buildHistoryTab(List<OrderModel> orders) {
     var filtered = orders;
     if (_historyFilter != 'Tất cả') {
-      filtered = filtered.where((o) => o.status == _historyFilter).toList();
+      filtered = filtered.where((o) => o.status.trim().toLowerCase() == _historyFilter.trim().toLowerCase()).toList();
     }
     if (_historyDate != null) {
       filtered = filtered.where((o) => OrderPolicy.isSameVnDay(o.createdAt, _historyDate!)).toList();
@@ -369,6 +370,8 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
           _buildFilterChip('Tất cả', _historyFilter, (v) => _historyFilter = v),
           _buildFilterChip('Completed', _historyFilter, (v) => _historyFilter = v, label: 'Đã hoàn thành'),
           _buildFilterChip('Cancelled', _historyFilter, (v) => _historyFilter = v, label: 'Đã hủy'),
+          _buildFilterChip('Pending', _historyFilter, (v) => _historyFilter = v, label: 'Chờ xác nhận'),
+          _buildFilterChip('Preparing', _historyFilter, (v) => _historyFilter = v, label: 'Đang chuẩn bị'),
         ]),
         Container(
           width: double.infinity,
@@ -376,11 +379,11 @@ class _SellerOrdersScreenState extends State<SellerOrdersScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              Icon(Icons.lock_outline_rounded, size: 16, color: Colors.brown.shade400),
+              Icon(Icons.history_rounded, size: 16, color: Colors.brown.shade400),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Đơn đã xong của các ngày trước, chỉ để xem. Đơn cũ còn dở nằm ở tab Hôm nay.',
+                  'Lịch sử toàn bộ đơn hàng (bao gồm các đơn đã hoàn thành và đã hủy của hôm nay và các ngày trước).',
                   style: TextStyle(fontSize: 12, color: Colors.brown.shade600),
                 ),
               ),

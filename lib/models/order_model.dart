@@ -143,14 +143,15 @@ class OrderModel {
   }
 
   factory OrderModel.fromMap(Map<String, dynamic> map, {required String id}) {
-    DateTime? created;
-    if (map['createdAt'] != null && map['createdAt'] is Timestamp) {
-      created = (map['createdAt'] as Timestamp).toDate();
-    } else if (map['orderDate'] != null && map['orderDate'] is Timestamp) {
-      created = (map['orderDate'] as Timestamp).toDate();
-    } else if (map['timestamp'] != null && map['timestamp'] is Timestamp) {
-      created = (map['timestamp'] as Timestamp).toDate();
+    DateTime? parseDate(dynamic val) {
+      if (val is Timestamp) return val.toDate();
+      if (val is String) return DateTime.tryParse(val);
+      if (val is num) return DateTime.fromMillisecondsSinceEpoch(val.toInt());
+      return null;
     }
+
+    DateTime? created = parseDate(map['createdAt']) ?? parseDate(map['orderDate']) ?? parseDate(map['timestamp']);
+    DateTime? accepted = parseDate(map['acceptedAt']);
 
     final code = map['orderCode'] ?? map['code'] ?? map['maDon'] ?? id.substring(0, id.length > 8 ? 8 : id.length).toUpperCase();
     final uid = map['userId'] ?? map['uid'] ?? map['customerId'] ?? '';
@@ -166,7 +167,8 @@ class OrderModel {
       total = int.tryParse(rawTotal.toString().replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
     }
 
-    final status = map['status'] ?? map['trangThai'] ?? 'Pending';
+    final rawStatus = map['status'] ?? map['trangThai'] ?? 'Pending';
+    final statusStr = rawStatus.toString().trim();
 
     List<OrderItemModel> itemList = [];
     final rawItems = map['items'] ?? map['cartItems'] ?? map['products'];
@@ -186,16 +188,16 @@ class OrderModel {
       userId: uid.toString(),
       customerName: name.toString(),
       customerEmail: email.toString(),
-      customerPhone: phone?.toString(),
+      customerPhone: phone?.toString().trim(),
       items: itemList,
       totalAmount: total,
-      status: status.toString(),
+      status: statusStr,
       createdAt: created,
-      acceptedAt: map['acceptedAt'] is Timestamp ? (map['acceptedAt'] as Timestamp).toDate() : null,
-      cancelledBy: map['cancelledBy']?.toString(),
-      cancelReason: map['cancelReason']?.toString(),
-      deliveryAddress: (map['deliveryAddress'] ?? map['address'] ?? '').toString(),
-      note: (map['note'] ?? '').toString(),
+      acceptedAt: accepted,
+      cancelledBy: map['cancelledBy']?.toString().trim(),
+      cancelReason: map['cancelReason']?.toString().trim(),
+      deliveryAddress: (map['deliveryAddress'] ?? map['address'] ?? '').toString().trim(),
+      note: (map['note'] ?? '').toString().trim(),
     );
   }
 

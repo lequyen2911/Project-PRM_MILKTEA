@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../models/order_model.dart';
+import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 
 class OrderHistoryScreen extends StatefulWidget {
@@ -274,7 +275,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Khách hàng: ${order.customerName}${order.customerPhone != null ? " • ${order.customerPhone}" : ""}',
+                      'Khách hàng: ${order.customerName}${(order.customerPhone != null && order.customerPhone!.trim().isNotEmpty) ? " • ${order.customerPhone}" : ""}',
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
                     ),
                   ),
@@ -409,7 +410,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           // Orders Stream
           Expanded(
             child: StreamBuilder<List<OrderModel>>(
-              stream: _dbService.getCustomerOrdersStream(userId),
+              stream: (user?.email?.trim().toLowerCase() == AuthService.adminEmail)
+                  ? _dbService.getOrdersStream()
+                  : _dbService.getCustomerOrdersStream(userId),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
@@ -419,7 +422,26 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
                 if (snapshot.hasError) {
                   return Center(
-                    child: Text('Lỗi tải dữ liệu: ${snapshot.error}'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.error_outline_rounded, size: 48, color: Colors.red.shade400),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Lỗi tải danh sách đơn hàng',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.grey.shade800),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Chi tiết: ${snapshot.error}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+                          ),
+                        ],
+                      ),
+                    ),
                   );
                 }
 
@@ -427,11 +449,12 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
                 // Lọc theo tab
                 final filteredOrders = allOrders.where((order) {
+                  final status = order.status.trim();
                   if (_selectedFilter == 'Tất cả') return true;
-                  if (_selectedFilter == 'Chờ xác nhận') return order.status == 'Pending';
-                  if (_selectedFilter == 'Đang chuẩn bị') return order.status == 'Preparing';
-                  if (_selectedFilter == 'Đã hoàn thành') return order.status == 'Completed';
-                  if (_selectedFilter == 'Đã hủy') return order.status == 'Cancelled';
+                  if (_selectedFilter == 'Chờ xác nhận') return status == 'Pending';
+                  if (_selectedFilter == 'Đang chuẩn bị') return status == 'Preparing';
+                  if (_selectedFilter == 'Đã hoàn thành') return status == 'Completed';
+                  if (_selectedFilter == 'Đã hủy') return status == 'Cancelled';
                   return true;
                 }).toList();
 
